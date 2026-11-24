@@ -1,0 +1,458 @@
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { invoke } from "@tauri-apps/api/core";
+import Sidebar from "./components/Sidebar";
+import Toolbar from "./components/Toolbar";
+import DownloadTable from "./components/DownloadTable";
+import SpeedChart, { type Sample } from "./components/SpeedChart";
+import BottomBar from "./components/BottomBar";
+import { SchedulerDialog, type ScheduleRule } from "./components/Dialogs";
+import { DownloadInfoDialog, DownloadProgressDialog, type StartConfig } from "./components/DownloadDialogs";
+import SettingsDialog from "./components/SettingsDialog";
+import AboutDialog from "./components/AboutDialog";
+import type { UpdateStatus } from "./lib/updater";
+import { ListFilter } from "lucide-react";
+import { inDesktop, engineAdd, enginePause, engineResume, engineCancel, registerTorrentHandler, requestPower, runAfterFinish, matchesFilter, parseFilterId, type AfterFinish, type Download } from "./lib/ipc";
+import { DEFAULT_SETTINGS, applyTheme, type Settings } from "./lib/themes";
+import { loadSettings, saveSettings } from "./lib/settings";
+import { fileNameFromUrl, previewDownloads, previewSizeFor } from "./lib/format";
+
+interface EngineSnapshotLike {
+  id: string;
+  size: number;
+  progress: number;
+  speed_bps: number;
+  peak_speed_bps: number;
+  eta_seconds: number | null;
+  threads: number;
+  status: string;
+}
+
+const THEME_KEY = "ultradm.theme";
+const PREVIEW = !inDesktop();
+
+function initialDark(): boolean {
+  const saved = localStorage.getItem(THEME_KEY);
+  if (saved) return saved === "dark";
+  return window.matchMedia("(prefers-color-scheme: dark)").matches;
+}
+
+export default function App() {
+  const [settings, setSettings] = useState<Settings>(DEFAULT_SETTINGS);
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  const [about, setAbout] = useState<{ status: UpdateStatus | null } | null>(null);
+  const [dark, setDark] = useState(initialDark);
+  const [active, setActive] = useState<string>("all");
+  const [downloads, setDownloads] = useState<Download[]>(() => (PREVIEW ? previewDownloads() : []));
+  const [deleted, setDeleted] = useState<Download[]>([]);
+  const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [history, setHistory] = useState<Sample[]>([]);
+  const [after, setAfter] = useState<AfterFinish>("none");
+  const [countdown, setCountdown] = useState<number | null>(null);
+  const [message, setMessage] = useState<string | null>(null);
+  const [dialog, setDialog] = useState<null | "link" | "torrent" | "scheduler">(null);
+  const [info, setInfo] = useState<null | { url: string; torrent: boolean }>(null);
+  const [progressId, setProgressId] = useState<string | null>(null);
+  const [rules, setRules] = useState<ScheduleRule[]>([
+    { id: 1, start: "02:00", end: "08:00", days: "يوميًا" },
+  ]);
+  const hadActive = useRef(false);
+
+  // تحميل الإعدادات المحفوظة عند البدء ثم تطبيق الثيم منها ودفع إعدادات
+  // حماية SSD إلى محرك الخلفية.
+  useEffect(() => {
+    loadSettings().then(async (s) => {
+      setSettings(s);
+      const t = applyTheme(s.theme);
+      setDark(t.dark);
+      try {
+        const { isTauri } = await import("@tauri-apps/api/core");
+        if (isTauri()) {
+          await invoke("engine_set_cache_config", {
+            ramFirst: s.ssdProtection,
+            ramFullLimitBytes: Math.round(s.ramFullLimitGB * 1024 * 1024 * 1024),
+          });
+        }
+      } catch {
+        // المعاينة الويب ليست تطبيق سطح المكتب
+      }
+    });
+  }, []);
+
+  // حفظ الثيم الليلي/النهاري الفوري (سريع)؛ الحفظ الدائم يتم بزر "حفظ وإغلاق".
+  useEffect(() => {
+    document.documentElement.classList.toggle("dark", dark);
+    localStorage.setItem(THEME_KEY, dark ? "dark" : "light");
+  }, [dark]);
+
+  const handleSaveSettings = async (s: Settings) => {
+    setSettings(s);
+    const t = applyTheme(s.theme);
+    setDark(t.dark);
+    await saveSettings(s);
+    setSettingsOpen(false);
+  };
+
+  // سطح المكتب: تقدّم لحظي من محرك Rust عبر حدث download://progress.
+  useEffect(() => {
+    if (PREVIEW) return;
+    let un: (() => void) | undefined;
+    import("@tauri-apps/api/event").then(({ listen }) => {
+      const p1 = listen<EngineSnapshotLike>("download://progress", (e) => {
+        const s = e.payload;
+        setDownloads((ds) => {
+          const i = ds.findIndex((d) => d.id === s.id);
+          if (i === -1) return ds;
+          const next = [...ds];
+          next[i] = {
+            ...next[i],
+            sizeBytes: s.size,
+            progress: s.progress,
+            speedBps: s.speed_bps,
+            peakSpeedBps: Math.max(s.peak_speed_bps, next[i].peakSpeedBps),
+            etaSeconds: s.eta_seconds,
+            threads: s.threads,
+            status: s.status as Download["status"],
+          };
+          return next;
+        });
+      });
+      const p2 = listen<string>("clipboard://link", (e) => {
+        setInfo({ url: e.payload, torrent: e.payload.startsWith("magnet:?") });
+      });
+      // التقطت إضافة المتصفح رابطًا: افتح نافذة "معلومات التحميل" فورًا.
+      const p3 = listen<{ url: string; kind?: string | null }>("extension://capture", (e) => {
+        const u = e.payload.url;
+        setInfo({ url: u, torrent: u.startsWith("magnet:?") || /\.torrent([?#]|$)/i.test(u) });
+      });
+      Promise.all([p1, p2, p3]).then(([u1, u2, u3]) => {
+        un = () => {
+          u1();
+          u2();
+          u3();
+        };
+      });
+    });
+    return () => un?.();
+  }, []);
+
+  // معاينة المتصفح فقط: محاكاة التقدم والسرعة لعرض الواجهة حية.
+  // في نسخة سطح المكتب تأتي هذه القيم من محرك التحميل في Rust عند ربطه.
+  useEffect(() => {
+    if (!PREVIEW) return;
+    const t = setInterval(() => {
+      setDownloads((ds) => {
+        const next = ds.map((d) => {
+          if (d.status !== "downloading") return { ...d, speedBps: 0, etaSeconds: null };
+          const speed = d.peakSpeedBps * (0.6 + Math.random() * 0.4);
+          const remaining = d.sizeBytes * (1 - d.progress / 100);
+          const got = Math.min(remaining, speed);
+          const progress = Math.min(100, d.progress + (got / d.sizeBytes) * 100);
+          const done = progress >= 100;
+          return {
+            ...d,
+            progress,
+            speedBps: done ? 0 : speed,
+            etaSeconds: done ? null : (remaining - got) / speed,
+            status: done ? ("done" as const) : d.status,
+          };
+        });
+        const total = next.reduce((s, d) => s + d.speedBps, 0);
+        setHistory((h) => [...h, { t: Date.now(), bps: total }].slice(-90));
+        return next;
+      });
+    }, 1000);
+    return () => clearInterval(t);
+  }, []);
+
+  const anyDownloading = downloads.some((d) => d.status === "downloading" || d.status === "queued");
+
+  useEffect(() => {
+    if (anyDownloading) {
+      hadActive.current = true;
+      return;
+    }
+    if (!hadActive.current || after === "none") return;
+    hadActive.current = false;
+    if (PREVIEW) {
+      setMessage("انتهت التحميلات — يُنفَّذ الإجراء في نسخة سطح المكتب فقط");
+      return;
+    }
+    if (after === "shutdown" || after === "sleep") {
+      // عدّاد تنازلي 30 ثانية للسلامة مع إمكانية الإلغاء.
+      setCountdown(30);
+      return;
+    }
+    runAfterFinish(after).catch((e) => setMessage(String(e)));
+  }, [anyDownloading, after]);
+
+  // العد التنازلي للطاقة: عند الصفر ينفّذ الأمر.
+  useEffect(() => {
+    if (countdown == null) return;
+    if (countdown <= 0) {
+      setCountdown(null);
+      if (after === "shutdown") requestPower("shutdown").catch((e) => setMessage(String(e)));
+      else if (after === "sleep") requestPower("sleep").catch((e) => setMessage(String(e)));
+      return;
+    }
+    const t = setTimeout(() => setCountdown((c) => (c == null ? null : c - 1)), 1000);
+    return () => clearTimeout(t);
+  }, [countdown, after]);
+
+  // تسجيل البرنامج كمستقبل magnet/.torrent في ويندوز.
+  useEffect(() => {
+    if (PREVIEW) return;
+    registerTorrentHandler().catch(() => {});
+  }, []);
+
+  const activeFilter = useMemo(() => parseFilterId(active), [active]);
+  const inTrash = activeFilter.kind === "deleted";
+
+  const rows = useMemo(() => {
+    if (activeFilter.kind === "deleted") return deleted;
+    return downloads.filter((d) => matchesFilter(d, activeFilter));
+  }, [downloads, deleted, activeFilter]);
+
+  const toggle = useCallback((id: string) => {
+    setSelected((s) => {
+      const n = new Set(s);
+      if (n.has(id)) n.delete(id);
+      else n.add(id);
+      return n;
+    });
+  }, []);
+
+  const selectAll = useCallback(
+    (checked: boolean) => setSelected(checked ? new Set(rows.map((r) => r.id)) : new Set()),
+    [rows],
+  );
+
+  const addDownload = async (cfg: StartConfig, later: boolean, torrent: boolean) => {
+    const name = fileNameFromUrl(cfg.url);
+    setDialog(null);
+    setInfo(null);
+    if (PREVIEW) {
+      const id = `dl-${Date.now()}`;
+      setDownloads((ds) => [
+        ...ds,
+        {
+          id,
+          name,
+          category: torrent ? "torrent" : cfg.category,
+          sizeBytes: previewSizeFor(name),
+          progress: 0,
+          speedBps: 0,
+          peakSpeedBps: 0,
+          etaSeconds: null,
+          threads: cfg.threads,
+          status: later ? "paused" : "downloading",
+          description: cfg.description,
+          savePath: cfg.savePath,
+        },
+      ]);
+      if (later) setMessage(`أُجِّل لاحقًا: ${name}`);
+      else setProgressId(id);
+      return;
+    }
+    try {
+      const dl = await engineAdd({
+        url: cfg.url,
+        savePath: cfg.savePath,
+        threads: cfg.threads,
+        category: torrent ? "torrent" : cfg.category,
+        description: cfg.description ?? null,
+      });
+      setDownloads((ds) => [...ds.filter((d) => d.id !== dl.id), dl]);
+      if (later) {
+        await enginePause(dl.id);
+        setMessage(`أُجِّل لاحقًا: ${dl.name}`);
+      } else {
+        setProgressId(dl.id);
+      }
+    } catch (e) {
+      setMessage(`فشل إضافة التحميل: ${String(e)}`);
+    }
+  };
+
+  const pauseSelected = () => {
+    if (PREVIEW) return setStatus(["downloading", "queued"], "paused");
+    selectedRows.filter((d) => d.status === "downloading" || d.status === "queued").forEach((d) => enginePause(d.id).catch(() => {}));
+    setStatus(["downloading", "queued"], "paused");
+  };
+
+  const resumeSelected = () => {
+    if (PREVIEW) return setStatus(["paused", "error"], "downloading");
+    selectedRows.filter((d) => d.status === "paused" || d.status === "error").forEach((d) => engineResume(d.id).catch(() => {}));
+    setStatus(["paused", "error"], "downloading");
+  };
+
+  const deleteSel = () => {
+    if (!inTrash) {
+      if (!PREVIEW) selectedRows.forEach((d) => engineCancel(d.id).catch(() => {}));
+      setDownloads((ds) => ds.filter((d) => !selected.has(d.id)));
+      setDeleted((ds) => [...selectedRows, ...ds]);
+      setSelected(new Set());
+      return;
+    }
+    setDeleted((ds) => ds.filter((d) => !selected.has(d.id)));
+    setSelected(new Set());
+  };
+
+  const restoreSel = () => {
+    const back = deleted.filter((d) => selected.has(d.id));
+    if (back.length === 0) return;
+    setDeleted((ds) => ds.filter((d) => !selected.has(d.id)));
+    setDownloads((ds) => [...back, ...ds]);
+    setSelected(new Set());
+  };
+
+  const progressDownload = progressId ? downloads.find((d) => d.id === progressId) : null;
+
+  const setStatus = (from: Download["status"][], to: Download["status"]) =>
+    setDownloads((ds) =>
+      ds.map((d) => (selected.has(d.id) && from.includes(d.status) ? { ...d, status: to } : d)),
+    );
+
+  const selectedRows = (inTrash ? deleted : downloads).filter((d) => selected.has(d.id));
+  const SidebarIcon = ListFilter;
+
+  return (
+    <div className="h-full flex" style={{ background: "var(--bg)" }}>
+      {/* على الشاشات الصغيرة يصبح الشريط الجانبي منزلاً يُفتح من زر عائم */}
+      <div className="max-lg:hidden">
+        <Sidebar
+          active={active}
+          onSelect={setActive}
+          downloads={downloads}
+          deletedCount={deleted.length}
+        />
+      </div>
+      {sidebarOpen && (
+        <div
+          className="lg:hidden fixed inset-0 z-40"
+          style={{ background: "rgba(0,0,0,.45)" }}
+          onClick={() => setSidebarOpen(false)}
+        >
+          <div
+            id="drawer"
+            className="h-full w-[262px] max-w-[85vw] shadow-2xl"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <Sidebar
+              active={active}
+              onSelect={(id) => {
+                setActive(id);
+                setSidebarOpen(false);
+              }}
+              downloads={downloads}
+              deletedCount={deleted.length}
+            />
+          </div>
+        </div>
+      )}
+
+      <main className="flex-1 min-w-0 flex flex-col">
+        <Toolbar
+          dark={dark}
+          onToggleTheme={() => setDark((d) => !d)}
+          onAddLink={() => setInfo({ url: "", torrent: false })}
+          onAddTorrent={() => setInfo({ url: "", torrent: true })}
+          onScheduler={() => setDialog("scheduler")}
+          onPause={pauseSelected}
+          onResume={inTrash ? restoreSel : resumeSelected}
+          onDelete={deleteSel}
+          trash={inTrash}
+          onOpenSettings={() => setSettingsOpen(true)}
+          onAbout={(st) => setAbout({ status: st })}
+          canPause={selectedRows.some((d) => d.status === "downloading" || d.status === "queued")}
+          canResume={inTrash ? selectedRows.length > 0 : selectedRows.some((d) => d.status === "paused" || d.status === "error")}
+          canDelete={selectedRows.length > 0}
+        />
+
+        <DownloadTable
+          rows={rows}
+          selected={selected}
+          onToggle={toggle}
+          onSelectAll={selectAll}
+          onAdd={() => setInfo({ url: "", torrent: false })}
+        />
+
+        <SpeedChart history={history} />
+
+        <BottomBar
+          action={after}
+          onAction={setAfter}
+          message={message}
+          countdown={countdown}
+          onCancelCountdown={() => setCountdown(null)}
+        />
+      </main>
+
+      {dialog === "scheduler" && (
+        <SchedulerDialog onClose={() => setDialog(null)} rules={rules} setRules={setRules} />
+      )}
+      {settingsOpen && (
+        <SettingsDialog
+          settings={settings}
+          onClose={() => setSettingsOpen(false)}
+          onSave={handleSaveSettings}
+        />
+      )}
+      {about && (
+        <AboutDialog
+          status={about.status}
+          onClose={() => setAbout(null)}
+        />
+      )}
+      <button
+        onClick={() => setSidebarOpen(true)}
+        aria-label="فتح التصفية"
+        className="lg:hidden fixed z-30 bottom-24 ltr:left-4 rtl:right-4 w-12 h-12 rounded-2xl grid place-items-center cursor-pointer"
+        style={{
+          background: "var(--color-accent)",
+          color: "#06231a",
+          boxShadow: "var(--shadow-2, 0 8px 24px rgba(0,0,0,.25))",
+        }}
+      >
+        <SidebarIcon />
+      </button>
+      {info && (
+        <DownloadInfoDialog
+          initialUrl={info.url}
+          isTorrent={info.torrent}
+          onClose={() => setInfo(null)}
+          onStart={(cfg) => addDownload(cfg, false, info.torrent)}
+          onLater={(cfg) => addDownload(cfg, true, info.torrent)}
+        />
+      )}
+      {progressDownload && (
+        <DownloadProgressDialog
+          download={progressDownload}
+          onClose={() => setProgressId(null)}
+          onPauseResume={() => {
+            if (PREVIEW) {
+              setDownloads((ds) =>
+                ds.map((d) =>
+                  d.id === progressDownload.id
+                    ? { ...d, status: d.status === "downloading" ? "paused" : "downloading" }
+                    : d,
+                ),
+              );
+              return;
+            }
+            if (progressDownload.status === "downloading" || progressDownload.status === "queued") {
+              enginePause(progressDownload.id).catch(() => {});
+            } else {
+              engineResume(progressDownload.id).catch(() => {});
+            }
+          }}
+          onCancel={() => {
+            if (!PREVIEW) engineCancel(progressDownload.id).catch(() => {});
+            setDownloads((ds) => ds.filter((d) => d.id !== progressDownload.id));
+            setProgressId(null);
+          }}
+        />
+      )}
+    </div>
+  );
+}
