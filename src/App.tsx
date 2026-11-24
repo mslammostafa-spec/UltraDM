@@ -54,7 +54,7 @@ export default function App() {
   const [info, setInfo] = useState<null | { url: string; torrent: boolean }>(null);
   const [progressId, setProgressId] = useState<string | null>(null);
   const [rules, setRules] = useState<ScheduleRule[]>([
-    { id: 1, start: "02:00", end: "08:00", days: "يومياً" },
+    { id: 1, start: "02:00", end: "08:00", days: "يوميًا" },
   ]);
   const hadActive = useRef(false);
 
@@ -120,7 +120,7 @@ export default function App() {
       const p2 = listen<string>("clipboard://link", (e) => {
         setInfo({ url: e.payload, torrent: e.payload.startsWith("magnet:?") });
       });
-      // التقطت إضافة المتصفح رابطاً: افتح نافذة "معلومات التحميل" فوراً.
+      // التقطت إضافة المتصفح رابطًا: افتح نافذة "معلومات التحميل" فورًا.
       const p3 = listen<{ url: string; kind?: string | null }>("extension://capture", (e) => {
         const u = e.payload.url;
         setInfo({ url: u, torrent: u.startsWith("magnet:?") || /\.torrent([?#]|$)/i.test(u) });
@@ -175,7 +175,7 @@ export default function App() {
     if (!hadActive.current || after === "none") return;
     hadActive.current = false;
     if (PREVIEW) {
-      setMessage("انتهت التحميلات — ينفذ الإجراء في نسخة سطح المكتب فقط");
+      setMessage("انتهت التحميلات — يُنفَّذ الإجراء في نسخة سطح المكتب فقط");
       return;
     }
     if (after === "shutdown" || after === "sleep") {
@@ -186,7 +186,7 @@ export default function App() {
     runAfterFinish(after).catch((e) => setMessage(String(e)));
   }, [anyDownloading, after]);
 
-  // العد التنازلي للطاقة: عند الصفر ينفذ الأمر.
+  // العد التنازلي للطاقة: عند الصفر ينفّذ الأمر.
   useEffect(() => {
     if (countdown == null) return;
     if (countdown <= 0) {
@@ -250,7 +250,7 @@ export default function App() {
           savePath: cfg.savePath,
         },
       ]);
-      if (later) setMessage(`أُجّل لاحقاً: ${name}`);
+      if (later) setMessage(`أُجِّل لاحقًا: ${name}`);
       else setProgressId(id);
       return;
     }
@@ -265,7 +265,7 @@ export default function App() {
       setDownloads((ds) => [...ds.filter((d) => d.id !== dl.id), dl]);
       if (later) {
         await enginePause(dl.id);
-        setMessage(`أُجّل لاحقاً: ${dl.name}`);
+        setMessage(`أُجِّل لاحقًا: ${dl.name}`);
       } else {
         setProgressId(dl.id);
       }
@@ -318,7 +318,7 @@ export default function App() {
 
   return (
     <div className="h-full flex" style={{ background: "var(--bg)" }}>
-      {/* على الشاشات الصغيرة يصبح الشريط الجانبي منزلاً يفتح من زر عائم */}
+      {/* على الشاشات الصغيرة يصبح الشريط الجانبي منزلاً يُفتح من زر عائم */}
       <div className="max-lg:hidden">
         <Sidebar
           active={active}
