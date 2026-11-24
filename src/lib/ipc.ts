@@ -89,7 +89,7 @@ export async function runAfterFinish(action: AfterFinish): Promise<void> {
   if (action === "quit") return exitApp();
 }
 
-// ——— محرك التحميل في Rust ———
+// ─── محرك التحميل في Rust ───
 
 export async function engineAdd(input: {
   url: string;
