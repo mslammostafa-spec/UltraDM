@@ -8,11 +8,12 @@
   window.__ultradm_capture = true;
 
   const seen = new Set();
-  const foundMedia = new Map();
+  const foundMedia = new Map(); // url -> {url, kind, size}
 
   let send = function (kind, url) {
     if (seen.has(url)) return;
     seen.add(url);
+    // حد أقصى للذاكرة
     if (seen.size > 500) seen.delete(seen.values().next().value);
     chrome.runtime.sendMessage({
       type: "capture",
@@ -32,6 +33,7 @@
     else if (S.isDirectDownload(url)) send("direct", url);
   }
 
+  // ==== 1) مراقب حركة الشبكة (PerformanceObserver) — يرى البث المخفي ====
   try {
     const obs = new PerformanceObserver((list) => {
       for (const e of list.getEntries()) inspectUrl(e.name, "network");
@@ -39,14 +41,18 @@
     obs.observe({ type: "resource", buffered: true });
   } catch { /* متصفح قديم */ }
 
+  // ==== 2) webRequest في الخلفية لا يرى الأجسام؛ هنا نتتبع الوسائط الحية ====
   function scanMediaElements(root) {
-    const els = (root || document).querySelectorAll("video, audio, source, track");
+    const els = (root || document).querySelectorAll(
+      "video, audio, source, track",
+    );
     els.forEach((el) => {
       if (el.src) inspectUrl(el.src, "element");
       if (el.currentSrc) inspectUrl(el.currentSrc, "element");
     });
   }
 
+  // ==== 3) اعتراض XHR/fetch المشفّرة في المشغلات ====
   try {
     const rawOpen = XMLHttpRequest.prototype.open;
     XMLHttpRequest.prototype.open = function (method, url, ...rest) {
@@ -63,8 +69,9 @@
         return rawFetch.call(this, input, init);
       };
     }
-  } catch { /* صفحات محمية */ }
+  } catch { /* صفحات محمية (يوتيوب تُراعي isolated world) */ }
 
+  // ==== 4) النقر على روابط Magnet/.torrent والروابط المباشرة ====
   document.addEventListener(
     "click",
     (ev) => {
@@ -81,6 +88,7 @@
     true,
   );
 
+  // ==== 5) قائمة السياق عبر مراقبة النقر بزر الفأرة الأيمن على الوسائط ====
   document.addEventListener(
     "mousedown",
     (ev) => {
@@ -92,6 +100,7 @@
     true,
   );
 
+  // ==== 6) مسح دوري خفيف لعناصر الوسائط الجديدة ====
   new MutationObserver((muts) => {
     for (const m of muts) {
       m.addedNodes && m.addedNodes.forEach((n) => {
@@ -104,6 +113,7 @@
   }).observe(document.documentElement, { childList: true, subtree: true });
   scanMediaElements(document);
 
+  // ==== استجابة للبوب-أب: قائمة الوسائط المكتشفة في هذا التبويب ====
   chrome.runtime.onMessage.addListener((m, _s, respond) => {
     if (m && m.type === "ultradm://list-media") {
       respond({ media: [...foundMedia.values()] });
@@ -111,6 +121,7 @@
     return false;
   });
 
+  // تسجيل الوسائط في خريطة العرض
   const origSend = send;
   send = function (kind, url) {
     if (kind === "stream" || kind === "media") foundMedia.set(url, { url, kind });
