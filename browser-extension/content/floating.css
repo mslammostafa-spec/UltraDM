@@ -1,0 +1,57 @@
+/* UltraDM — الزر العائم: يتبع ثيم البرنامج عبر المتغيرات --ultradm-accent/--ultradm-glow */
+.ultradm-fab {
+  --ultradm-accent: #3b82f6;
+  --ultradm-glow: #8b5cf6;
+  position: absolute !important;
+  z-index: 2147483646 !important;
+  top: 10px !important;
+  right: 10px !important;
+  width: 40px !important;
+  height: 40px !important;
+  min-height: 40px !important;
+  padding: 0 !important;
+  border-radius: 12px !important;
+  border: 1px solid color-mix(in srgb, var(--ultradm-accent) 45%, transparent) !important;
+  background: linear-gradient(
+    135deg,
+    color-mix(in srgb, var(--ultradm-accent) 85%, black),
+    var(--ultradm-glow)
+  ) !important;
+  color: #fff !important;
+  display: grid !important;
+  place-items: center !important;
+  cursor: pointer !important;
+  opacity: 0;
+  transition: opacity 150ms ease, transform 150ms ease, box-shadow 150ms ease;
+  box-shadow: 0 4px 18px color-mix(in srgb, var(--ultradm-glow) 45%, transparent) !important;
+  pointer-events: auto !important;
+}
+
+.ultradm-fab:hover,
+.ultradm-fab:focus-visible {
+  opacity: 1 !important;
+  transform: translateY(-1px) scale(1.05);
+  outline: 2px solid var(--ultradm-accent) !important;
+  outline-offset: 2px !important;
+}
+
+.ultradm-fab:active {
+  transform: scale(0.96);
+}
+
+video:hover ~ .ultradm-fab,
+.ultradm-fab:hover,
+.ultradm-fab:focus-visible,
+.ultradm-fab[data-visible] {
+  opacity: 1 !important;
+}
+
+.ultradm-fab svg {
+  display: block;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ultradm-fab {
+    transition: none;
+  }
+}
