@@ -47,7 +47,7 @@ jobs:
         with:
           tagName: v__VERSION__
           releaseName: "UltraDM v__VERSION__"
-          releaseBody: "حمّل الملف التنفيذي المناسب لمعالجتك (x64 أو ARM64). ملف latest.json مطلوب لتحديثات البرنامج التلقائي."
+          releaseBody: "حمّل الملف التنفيذي المناسب لمعالجتك (x64 أو ARM64). ملف latest.json مطلوب لتحديثات البرنامج التلقائية."
           releaseDraft: false
           prerelease: false
           args: --target ${{ matrix.target }}
@@ -63,6 +63,10 @@ jobs:
         if: matrix.target == 'x86_64-pc-windows-msvc'
         run: node scripts/zip-extension.mjs
 
+      # توقيع مجاني عبر SignPath (مجاني للمشاريع مفتوحة المصدر):
+      # 1. اربط مستودع GitHub بمشروع SignPath وفعّل GitHub App.
+      # 2. أضف أسرار المنظمة: SIGNPATH_API_TOKEN و SIGNPATH_ORGANIZATION_ID و SIGNPATH_SIGNING_POLICY.
+      # 3. إن لم تُضَف الأسرار تُرفع الحزمة غير الموقّعة (متجر مايكروسوفت يوقّعها مجاناً عند القبول).
       - name: Sign Microsoft Store package via SignPath (free OSS signing)
         if: matrix.target == 'x86_64-pc-windows-msvc' && secrets.SIGNPATH_API_TOKEN != ''
         uses: signpath/github-action-signpath@v1
