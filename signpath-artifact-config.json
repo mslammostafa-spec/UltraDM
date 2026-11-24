@@ -1,0 +1,10 @@
+{
+  "version": 1,
+  "artifacts": [
+    {
+      "type": "file",
+      "path": "UltraDM-Store-x64.msi",
+      "description": "UltraDM Microsoft Store MSI package (per-machine, MSIX-ready)"
+    }
+  ]
+}
