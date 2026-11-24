@@ -1,0 +1,91 @@
+name: Release UltraDM
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            target: x86_64-pc-windows-msvc
+          - os: windows-latest
+            target: aarch64-pc-windows-msvc
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - uses: swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+
+      - name: Install frontend dependencies
+        run: npm ci
+
+      - name: Build Tauri app (NSIS installer + updater artifacts)
+        uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        with:
+          tagName: v__VERSION__
+          releaseName: "UltraDM v__VERSION__"
+          releaseBody: "حمّل الملف التنفيذي المناسب لمعالجتك (x64 أو ARM64). ملف latest.json مطلوب لتحديثات البرنامج التلقائية."
+          releaseDraft: false
+          prerelease: false
+          args: --target ${{ matrix.target }}
+
+      - name: Build Microsoft Store package (MSIX-ready MSI)
+        if: matrix.target == 'x86_64-pc-windows-msvc'
+        run: |
+          npx tauri build --config src-tauri/tauri.microsoftstore.conf.json --target ${{ matrix.target }}
+          mkdir -p store-package
+          cp src-tauri/target/${{ matrix.target }}/release/bundle/msi/*.msi store-package/UltraDM-Store-x64.msi
+
+      - name: Zip browser extension for Edge Add-ons / Chrome Web Store
+        if: matrix.target == 'x86_64-pc-windows-msvc'
+        run: node scripts/zip-extension.mjs
+
+      # توقيع مجاني عبر SignPath (مجاني للمشاريع مفتوحة المصدر):
+      # 1. اربط مستودع GitHub بمشروع SignPath وفعّل GitHub App.
+      # 2. أضف أسرار المنظمة: SIGNPATH_API_TOKEN و SIGNPATH_ORGANIZATION_ID و SIGNPATH_SIGNING_POLICY.
+      # 3. إن لم تُضَف الأسرار تُرفع الحزمة غير الموقّعة (متجر مايكروسوفت يوقّعها مجاناً عند القبول).
+      - name: Sign Microsoft Store package via SignPath (free OSS signing)
+        if: matrix.target == 'x86_64-pc-windows-msvc' && secrets.SIGNPATH_API_TOKEN != ''
+        uses: signpath/github-action-signpath@v1
+        with:
+          api-token: '${{ secrets.SIGNPATH_API_TOKEN }}'
+          organization-id: '${{ secrets.SIGNPATH_ORGANIZATION_ID }}'
+          signing-policy-slug: '${{ secrets.SIGNPATH_SIGNING_POLICY }}'
+          artifact-configuration-file: signpath-artifact-config.json
+          artifact-path: store-package/UltraDM-Store-x64.msi
+          output-artifact-path: store-package/UltraDM-Store-x64-signed.msi
+          github-input: auto
+
+      - name: Upload store package and extension zip as artifacts
+        if: matrix.target == 'x86_64-pc-windows-msvc'
+        uses: actions/upload-artifact@v4
+        with:
+          name: microsoft-store-package
+          path: |
+            store-package/UltraDM-Store-x64.msi
+            store-package/UltraDM-Store-x64-signed.msi
+            browser-extension.zip
+          if-no-files-found: ignore

@@ -1,0 +1,24 @@
+# Dependencies
+node_modules/
+
+# Rust / Tauri build output
+src-tauri/target/
+src-tauri/gen/sqitch/
+
+# Frontend build output
+dist/
+
+# Generated release artifacts
+browser-extension.zip
+
+# Tauri generated identifiers (kept if your team shares them; remove the line below to commit them)
+# src-tauri/gen/
+
+# Logs and OS files
+*.log
+.DS_Store
+Thumbs.db
+
+# Editor
+.vscode/
+.idea/

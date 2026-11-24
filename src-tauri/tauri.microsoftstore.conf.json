@@ -1,0 +1,50 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "UltraDM",
+  "version": "1.0.0",
+  "identifier": "62075UltraDM.35296B77688A9",
+  "build": {
+    "beforeBuildCommand": "npm run build",
+    "frontendDist": "../dist"
+  },
+  "app": {
+    "windows": [
+      {
+        "title": "UltraDM",
+        "label": "main",
+        "width": 1280,
+        "height": 800,
+        "minWidth": 960,
+        "minHeight": 620,
+        "center": true,
+        "resizable": true,
+        "decorations": false,
+        "dragDropEnabled": true
+      }
+    ],
+    "security": {
+      "csp": "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self'; connect-src 'self' ipc: http://ipc.localhost; object-src 'none'; base-uri 'self'; form-action 'none'",
+      "freezePrototype": true
+    }
+  },
+  "bundle": {
+    "active": true,
+    "targets": ["msi"],
+    "icon": ["icons/icon.ico"],
+    "publisher": "UltraDM",
+    "windows": {
+      "webviewInstallMode": { "type": "downloadBootstrapper" },
+      "wix": {
+        "language": ["en-US", "ar-SA"],
+        "installMode": "perMachine"
+      },
+      "certificateThumbprint": null,
+      "signCommand": null,
+      "allowDowngrades": false,
+      "metadata": {
+        "minimalOperatingSystem": "10.0.17763.0"
+      }
+    }
+  },
+  "plugins": {}
+}
