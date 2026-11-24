@@ -39,15 +39,25 @@
       userAgent: navigator.userAgent,
       source: "floating-button",
     }).catch(() => {});
+    flash(btn, "جارٍ الإرسال…");
   }
 
+  function flash(btn, text) {
+    const old = btn.title;
+    btn.title = text;
+    setTimeout(() => (btn.title = old), 1500);
+  }
+
+  // يبحث عن أقرب مشغل وسائط لنقطة تركيز في الصفحة.
   function currentMediaUrl(container) {
     const v = container.querySelector("video, audio");
     if (v && (v.currentSrc || v.src)) return v.currentSrc || v.src;
+    // يوتيوب: استخرج معرّف الفيديو من الرابط وأرسله كطلب جودات.
     const m = location.href.match(
       /(?:youtube\.com\/(?:watch\?.*v=|shorts\/)|youtu\.be\/)([\w-]{11})/i,
     );
     if (m && location.hostname.includes("youtube")) return "https://www.youtube.com/watch?v=" + m[1];
+    // تيك توك / إنستغرام / إكس: أرسل رابط الصفحة ليحللها yt-dlp في UltraDM.
     if (MEDIA_HOSTS.test(location.hostname)) return location.href;
     return null;
   }
@@ -69,17 +79,21 @@
     return btn;
   }
 
+  // حاويات المشغلات المعروفة + أي عنصر video/audio عام.
   function attach() {
+    // 1) عناصر وسائط عامة
     document.querySelectorAll("video, audio").forEach((el) => {
       if (!el.parentElement) return;
       const btn = buttonFor(el.parentElement);
       if (btn) el.parentElement.appendChild(btn);
     });
+    // 2) حاويات يوتيوب
     const yt = document.querySelector("ytd-player, #movie_player, .html5-video-player");
     if (yt) {
       const btn = buttonFor(yt);
       if (btn) yt.appendChild(btn);
     }
+    // 3) حاويات المنصات الأخرى (مؤشر على أقرب عنصر وسائط)
     document
       .querySelectorAll(
         '[data-testid="video-player"], [class*="player"], [class*="Player"]',
@@ -95,5 +109,5 @@
   const mo = new MutationObserver(() => attach());
   mo.observe(document.documentElement, { childList: true, subtree: true });
   attach();
-  setInterval(attach, 3000);
+  setInterval(attach, 3000); // المشغلات الديناميكية (SPA)
 })();
