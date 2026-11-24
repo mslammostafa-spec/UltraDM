@@ -23,7 +23,6 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 22
-          cache: npm
 
       - uses: dtolnay/rust-toolchain@stable
         with:
@@ -34,7 +33,7 @@ jobs:
           workspaces: src-tauri
 
       - name: Install frontend dependencies
-        run: npm ci
+        run: npm install
 
       - name: Build Tauri app (NSIS installer + updater artifacts)
         uses: tauri-apps/tauri-action@v0
@@ -61,7 +60,7 @@ jobs:
         if: matrix.target == 'x86_64-pc-windows-msvc'
         run: node scripts/zip-extension.mjs
 
-    
+
 
       - name: Upload store package and extension zip as artifacts
         if: matrix.target == 'x86_64-pc-windows-msvc'
