@@ -50,6 +50,7 @@ function dedupe(url) {
 }
 
 function deliver(payload) {
+  // الأولوية لقناة WebSocket (سرعة فائقة)، وNative Messaging بديل عند غيابها.
   if (wsReady && ws && ws.send(JSON.stringify(payload))) return true;
   return sendNative(payload);
 }
@@ -86,6 +87,8 @@ function applyTheme(t) {
   broadcast({ type: "ultradm://theme", theme });
 }
 
+// ==== قناة WebSocket ====
+
 function connectWs() {
   if (!enabled) return;
   try {
@@ -97,6 +100,7 @@ function connectWs() {
   ws.onopen = () => {
     wsReady = true;
     setStatus("online");
+    // اطلب الثيم الحالي من البرنامج ومرّر الإعدادات.
     ws.send(JSON.stringify({ type: "hello", extension: "ultradm", version: "1.0.0" }));
   };
   ws.onmessage = (ev) => {
@@ -113,7 +117,7 @@ function connectWs() {
         });
       }
     } catch {
-      /* تجاهل */
+      /* رسائل غير صالحة تُتجاهل */
     }
   };
   ws.onclose = () => {
@@ -134,6 +138,8 @@ function scheduleReconnect() {
   }, RECONNECT_MS);
 }
 
+// ==== الالتقاط من سكربتات المحتوى ====
+
 function cookiesFor(url) {
   return new Promise((resolve) => {
     if (isMagnet(url)) return resolve([]);
@@ -153,80 +159,57 @@ async function handleCapture(m) {
 
   const payload = {
     type: "capture",
-    kind: m.kind || (isTorrentish(url) ? "torrent" : isStreamMedia(url) ? "stream" : isDirectDownload(url) ? "direct" : "media"),
+    kind: m.kind, // direct | torrent | media | stream
     url,
     pageUrl: m.pageUrl || "",
-    fileName: m.fileName || fileNameFromUrl(url),
-    userAgent: await getUserAgent(),
+    fileName: m.fileName || S.fileNameFromUrl(url),
+    userAgent: m.userAgent || "",
+    referer: m.pageUrl || "",
     cookies: await cookiesFor(url),
+    source: m.source || "content",
   };
-  const ok = deliver(payload);
-  if (ok) chrome.notifications.create({
-    type: "basic",
-    iconUrl: "icons/icon128.png",
-    title: "UltraDM",
-    message: "أُرسل الرابط إلى البرنامج: " + url.slice(0, 80),
-  });
-  return { ok };
+
+  // Magnet يمر عبر Native Messaging دائمًا (لا يمكن إرساله عبر HTTP).
+  const ok = payload.kind === "torrent" ? sendNative(payload) || deliver(payload) : deliver(payload);
+  return { ok: Boolean(ok), transport: ok ? (wsReady ? "ws" : "native") : "none" };
 }
 
-async function getUserAgent() {
-  try {
-    const info = await chrome.runtime.getPlatformInfo();
-    return navigator.userAgent + " (" + info.os + ")";
-  } catch {
-    return navigator.userAgent;
+chrome.runtime.onMessage.addListener((m, _sender, sendResponse) => {
+  if (m.type === "capture") {
+    handleCapture(m).then(sendResponse);
+    return true; // استجابة غير متزامنة
   }
-}
-
-chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
-  if (msg?.type === "capture") {
-    handleCapture(msg).then(sendResponse);
-    return true;
+  if (m.type === "ultradm://get-state") {
+    sendResponse({ status, theme, enabled });
+    return false;
   }
-  if (msg?.type === "ultradm://get-state") {
-    sendResponse({ status, enabled, theme });
-    return;
-  }
-  if (msg?.type === "ultradm://set-enabled") {
-    enabled = msg.enabled;
+  if (m.type === "ultradm://set-enabled") {
+    enabled = !!m.enabled;
     chrome.storage.local.set({ enabled });
     updateBadge();
-    if (enabled) connectWs();
+    if (enabled) { setStatus("connecting"); connectWs(); }
+    else { setStatus("offline"); try { ws && ws.close(); } catch {} }
     sendResponse({ ok: true });
-    return;
+    return false;
   }
-  if (msg?.type === "ultradm://probe-url") {
-    chrome.tabs.query({ active: true, currentWindow: true }, async (tabs) => {
-      const tab = tabs[0];
-      if (!tab?.id) return sendResponse({ media: [] });
-      try {
-        const r = await chrome.tabs.sendMessage(tab.id, { type: "ultradm://list-media" });
+  if (m.type === "ultradm://probe-url") {
+    // من البوب-أب: احصل على وسائط التبويب الحالي من السكربتات ثم أرسلها.
+    chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
+      const t = tabs[0];
+      if (t) chrome.tabs.sendMessage(t.id, { type: "ultradm://list-media" }, (r) => {
         sendResponse(r || { media: [] });
-      } catch {
-        sendResponse({ media: [] });
-      }
+      });
     });
     return true;
   }
+  return false;
 });
 
-chrome.storage.local.get(["enabled", "theme"], (d) => {
-  if (typeof d.enabled === "boolean") enabled = d.enabled;
-  if (d.theme) theme = d.theme;
+chrome.storage.local.get(["theme", "enabled"], (s) => {
+  if (s.theme) theme = s.theme;
+  if (typeof s.enabled === "boolean") enabled = s.enabled;
   updateBadge();
   connectWs();
 });
 
-chrome.webRequest.onHeadersReceived.addListener(
-  (details) => {
-    if (!enabled) return;
-    const ct = (details.responseHeaders || []).find((h) => h.name.toLowerCase() === "content-type");
-    const v = (ct?.value || "").toLowerCase();
-    if (v.includes("mpegurl") || v.includes("dash+xml") || v.includes("video/") || v.includes("audio/")) {
-      handleCapture({ kind: "stream", url: details.url, pageUrl: details.initiator || "" });
-    }
-  },
-  { urls: ["<all_urls>"] },
-  ["responseHeaders"],
-);
+chrome.runtime.onInstalled.addListener(() => connectWs());
