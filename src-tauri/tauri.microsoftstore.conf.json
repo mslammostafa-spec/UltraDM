@@ -29,21 +29,22 @@
   },
   "bundle": {
     "active": true,
-    "targets": ["msi"],
-    "icon": ["icons/icon.ico"],
+    "targets": [
+      "msi"
+    ],
+    "icon": [
+      "icons/icon.ico"
+    ],
     "publisher": "UltraDM",
     "windows": {
-      "webviewInstallMode": { "type": "downloadBootstrapper" },
+      "webviewInstallMode": {
+        "type": "downloadBootstrapper"
+      },
       "wix": {
-        "language": ["en-US", "ar-SA"],
+        "language": "en-US",
         "installMode": "perMachine"
       },
-      "certificateThumbprint": null,
-      "signCommand": null,
-      "allowDowngrades": false,
-      "metadata": {
-        "minimalOperatingSystem": "10.0.17763.0"
-      }
+      "allowDowngrades": false
     }
   },
   "plugins": {}
