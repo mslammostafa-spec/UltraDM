@@ -22,6 +22,8 @@ Grab the latest installer from [Releases](https://github.com/mslammostafa-spec/U
 - `UltraDM_1.0.0_x64-setup.exe` — NSIS installer (recommended)
 - `UltraDM_1.0.0_x64_en-US.msi` — MSI package
 
+Free code signing provided by [SignPath.io](https://signpath.io), certificate by [SignPath Foundation](https://signpath.org).
+
 The installers are not code-signed yet; Windows SmartScreen may show a warning — choose **More info → Run anyway**.
 
 ## Building from source / البناء من الكود المصدري
