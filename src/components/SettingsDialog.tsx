@@ -48,6 +48,7 @@ export default function SettingsDialog({
   const [saving, setSaving] = useState(false);
   const [ext, setExt] = useState<ExtensionStatus | null>(null);
   const [extBusy, setExtBusy] = useState(false);
+  const [extMsg, setExtMsg] = useState<{ ok: boolean; text: string } | null>(null);
 
   const loadExt = () =>
     invoke<ExtensionStatus>("extension_binding_status")
@@ -56,11 +57,19 @@ export default function SettingsDialog({
 
   const registerExt = async () => {
     setExtBusy(true);
+    setExtMsg(null);
     try {
       const r = await invoke<BrowserBinding[]>("extension_register_browsers");
       setExt((s) => (s ? { ...s, browsers: r } : s));
-    } catch {
-      /* غير متاح خارج ويندوز */
+      const linked = r.filter((b) => b.hostRegistered).length;
+      setExtMsg({
+        ok: true,
+        text: linked > 0
+          ? `تم تثبيت الربط بنجاح لـ ${linked} متصفح.`
+          : "تم تسجيل المضيف، لكن لم يُكتشف أي متصفح مثبّت.",
+      });
+    } catch (e) {
+      setExtMsg({ ok: false, text: `فشل تثبيت الربط: ${String(e)}` });
     } finally {
       setExtBusy(false);
     }
@@ -237,6 +246,19 @@ export default function SettingsDialog({
                 {extBusy ? "جارٍ التثبيت…" : "تثبيت الربط تلقائياً"}
               </button>
             </div>
+            {extMsg && (
+              <div
+                role="status"
+                className="rounded-xl border px-3 py-2 text-[12px] font-semibold mb-3"
+                style={{
+                  borderColor: extMsg.ok ? "var(--color-accent)" : "#ef4444",
+                  color: extMsg.ok ? "var(--color-accent)" : "#ef4444",
+                  background: "var(--surface-2)",
+                }}
+              >
+                {extMsg.text}
+              </div>
+            )}
             {ext && (
               <ul className="grid grid-cols-2 min-[560px]:grid-cols-4 gap-2">
                 {ext.browsers.map((b) => (
