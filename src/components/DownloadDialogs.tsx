@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useReducer, useState } from "react";
 import {
   Film, Music, FileArchive, Package, FileText, Magnet, FolderOpen, Info, Gauge,
-  CheckCircle2, Pause, Play, XCircle, ChevronDown, ChevronUp, HardDrive, FileClock,
+  CheckCircle2, Pause, Play, XCircle, ChevronDown, ChevronUp, HardDrive, FileClock, Activity,
 } from "lucide-react";
 import { Category, Download } from "../lib/ipc";
 import { mediaCheck, mediaProbe, mediaDownload, type MediaInfo, type MediaFormat } from "../lib/media";
@@ -358,14 +358,18 @@ export function DownloadProgressDialog({
   const [limiterOn, setLimiterOn] = useState(false);
   const [limitKbs, setLimitKbs] = useState(2048);
   const [afterDone, setAfterDone] = useState({ openFolder: false, closeApp: false, virusScan: true });
+  const [speedHistory, setSpeedHistory] = useState<number[]>([]);
   const [, tick] = useReducer((x: number) => x + 1, 0);
 
-  // نبضة تحديث لتحريك أشرطة الأجزاء أثناء التحميل.
+  // نبضة تحديث لتحريك أشرطة الأجزاء وأرشفة سرعة حية للرسم الموجي.
   useEffect(() => {
     if (download.status !== "downloading") return;
-    const t = setInterval(tick, 700);
+    const t = setInterval(() => {
+      tick();
+      setSpeedHistory((h) => [...h.slice(-88), download.speedBps]);
+    }, 700);
     return () => clearInterval(t);
-  }, [download.status, tick]);
+  }, [download.status, tick, download.speedBps]);
 
   const segments: Segment[] = useMemo(() => {
     const n = Math.max(1, download.threads);
@@ -381,15 +385,24 @@ export function DownloadProgressDialog({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [download.threads, Math.round(download.progress), download.status]);
 
-  const Icon = CAT_ICON[download.category];
   const downloading = download.status === "downloading";
   const downloadedBytes = (download.sizeBytes * download.progress) / 100;
 
   return (
     <Modal title="حالة التحميل التفصيلية" onClose={onClose} wide>
       <div className="flex items-center gap-3 mb-4">
-        <div className="grid place-items-center w-10 h-10 rounded-xl shrink-0" style={{ background: "var(--surface-2)", color: "var(--ok)" }}>
-          <Icon size={19} />
+        <div className="grid place-items-center w-10 h-10 shrink-0" style={{ color: "var(--ok)" }}>
+          <svg viewBox="0 0 24 24" width="30" height="30" aria-hidden="true">
+            <defs>
+              <linearGradient id="hex-grad" x1="0" y1="0" x2="1" y2="1">
+                <stop offset="0%" stopColor="#34d399" /><stop offset="100%" stopColor="#22d3ee" />
+              </linearGradient>
+            </defs>
+            <path d="M12 2l8.66 5v10L12 22l-8.66-5V7z" fill="none" stroke="url(#hex-grad)" strokeWidth="1.8"
+                  style={{ filter: "drop-shadow(0 0 3px rgba(52,211,153,.6))" }} />
+            <path d="M12 7v7m-3-4 3 3 3-3" fill="none" stroke="url(#hex-grad)" strokeWidth="1.8"
+                  strokeLinecap="round" strokeLinejoin="round" />
+          </svg>
         </div>
         <div className="min-w-0 flex-1">
           <p className="font-bold text-[13.5px] truncate">{download.name}</p>
@@ -417,6 +430,14 @@ export function DownloadProgressDialog({
 
       {tab === "status" && (
         <>
+          {/* العداد الدائري المتوهج + الرسم الموجي المزدوج */}
+          <div className="flex items-center gap-4 mb-4 flex-wrap">
+            <ProgressRing progress={download.progress} speed={downloading ? download.speedBps : 0} />
+            <div className="flex-1 min-w-[220px]">
+              <MiniWave history={speedHistory} active={downloading} />
+            </div>
+          </div>
+
           <div className="grid grid-cols-2 sm:grid-cols-3 gap-2 mb-4">
             <Stat label="الحالة" value={download.status === "done" ? "اكتمل" : downloading ? "جارٍ التحميل" : download.status === "paused" ? "متوقف مؤقتًا" : "بالانتظار"} />
             <Stat label="حجم الملف" value={formatBytes(download.sizeBytes)} />
@@ -512,7 +533,7 @@ export function DownloadProgressDialog({
             <table className="w-full border-separate border-spacing-0 text-[12px]">
               <thead className="sticky top-0 z-10">
                 <tr style={{ background: "var(--surface-2)" }}>
-                  {["الاتصال", "من بايت", "إلى بايت", "التقدم", "الحالة"].map((h) => (
+                  {["الاتصال", "من بايت", "إلى بايت", "السرعة الحية", "التقدم", "الحالة"].map((h) => (
                     <th key={h} className="h-9 px-3 text-right font-semibold whitespace-nowrap border-b"
                         style={{ borderColor: "var(--border)", color: "var(--muted)" }}>{h}</th>
                   ))}
@@ -521,11 +542,15 @@ export function DownloadProgressDialog({
               <tbody>
                 {segments.map((s) => {
                   const slice = download.sizeBytes / download.threads;
+                  const lineSpeed = downloading ? (download.speedBps * s.progress) / 100 : 0;
                   return (
                     <tr key={s.i} style={{ background: s.i % 2 ? "var(--surface-2)" : "var(--surface)" }}>
                       <td className="px-3 h-9 tabular-nums font-bold border-b" style={{ borderColor: "var(--border)" }}>#{s.i + 1}</td>
                       <td className="px-3 tabular-nums border-b" style={{ borderColor: "var(--border)", color: "var(--muted)" }}>{formatBytes(s.i * slice)}</td>
                       <td className="px-3 tabular-nums border-b" style={{ borderColor: "var(--border)", color: "var(--muted)" }}>{formatBytes((s.i + 1) * slice)}</td>
+                      <td className="px-3 tabular-nums border-b font-semibold" style={{ borderColor: "var(--border)", color: lineSpeed > 0 ? "var(--ok)" : "var(--muted)" }}>
+                        {lineSpeed > 0 ? formatSpeed(lineSpeed) : "—"}
+                      </td>
                       <td className="px-3 border-b min-w-[140px]" style={{ borderColor: "var(--border)" }}>
                         <div className="flex items-center gap-2">
                           <div className="h-1.5 flex-1 rounded-full overflow-hidden" style={{ background: "var(--surface)" }}>
@@ -555,6 +580,81 @@ function Stat({ label, value, accent }: { label: string; value: string; accent?:
     <div className="rounded-xl px-3 py-2" style={{ background: "var(--surface-2)" }}>
       <p className="text-[11px] font-semibold mb-0.5" style={{ color: "var(--muted)" }}>{label}</p>
       <p className="text-[12.5px] font-bold tabular-nums truncate" style={{ color: accent ? "var(--ok)" : "var(--text)" }}>{value}</p>
+    </div>
+  );
+}
+
+/* العداد الدائري المتوهج لنسبة الإنجاز والسرعة (زجاجية زمردي/سماوي). */
+function ProgressRing({ progress, speed }: { progress: number; speed: number }) {
+  const R = 40;
+  const C = 2 * Math.PI * R;
+  const p = Math.min(100, Math.max(0, progress));
+  return (
+    <div className="relative grid place-items-center w-[112px] h-[112px] rounded-full shrink-0"
+         role="img" aria-label={`نسبة الإنجاز ${p.toFixed(1)}٪`}
+         style={{ background: "var(--surface-2)" }}>
+      <svg width="112" height="112" viewBox="0 0 112 112" className="absolute inset-0">
+        <defs>
+          <linearGradient id="ring-grad" x1="0" y1="0" x2="1" y2="1">
+            <stop offset="0%" stopColor="#34d399" />
+            <stop offset="100%" stopColor="#22d3ee" />
+          </linearGradient>
+          <filter id="ring-glow" x="-30%" y="-30%" width="160%" height="160%">
+            <feGaussianBlur stdDeviation="3" result="b" />
+            <feMerge><feMergeNode in="b" /><feMergeNode in="SourceGraphic" /></feMerge>
+          </filter>
+        </defs>
+        <circle cx="56" cy="56" r={R} fill="none" stroke="var(--border)" strokeWidth="7" />
+        <circle cx="56" cy="56" r={R} fill="none" stroke="url(#ring-grad)" strokeWidth="7"
+                strokeLinecap="round" filter="url(#ring-glow)"
+                strokeDasharray={C} strokeDashoffset={C * (1 - p / 100)}
+                transform="rotate(-90 56 56)" />
+      </svg>
+      <div className="text-center leading-tight">
+        <p className="font-display font-bold text-[20px] tabular-nums" style={{ color: "var(--ok)" }}>{p.toFixed(1)}٪</p>
+        <p className="text-[10.5px] font-semibold tabular-nums" style={{ color: "var(--muted)" }}>
+          {speed > 0 ? formatSpeed(speed) : "—"}
+        </p>
+      </div>
+    </div>
+  );
+}
+
+/* رسم موجي مزدوج: السرعة الحالية ومتوسطها (زمردي وسماوي). */
+function MiniWave({ history, active }: { history: number[]; active: boolean }) {
+  const W = 300, H = 96, N = 90;
+  const { wave, avgWave, now } = useMemo(() => {
+    const pts = history.slice(-N);
+    const max = Math.max(1, ...pts);
+    const avg = pts.length ? pts.reduce((a, b) => a + b, 0) / pts.length : 0;
+    const xy = (arr: number[]) =>
+      arr.length >= 2
+        ? arr.map((v, i) => `${((i / (arr.length - 1)) * W).toFixed(1)},${(H - (v / max) * (H - 8) - 4).toFixed(1)}`).join(" ")
+        : `0,${H - 4} ${W},${H - 4}`;
+    return { wave: xy(pts), avgWave: xy(pts.map(() => avg)), now: pts.at(-1) ?? 0 };
+  }, [history]);
+  return (
+    <div className="rounded-2xl border p-2" style={{ borderColor: "var(--border)", background: "var(--surface-2)" }}>
+      <div className="flex items-center gap-2 text-[11px] font-semibold mb-1" style={{ color: "var(--muted)" }}>
+        <Activity size={12} style={{ color: "var(--color-accent)" }} />
+        سرعة النقل
+        <span className="tabular-nums ms-auto font-bold" style={{ color: active ? "var(--ok)" : "var(--muted)" }}>
+          {active ? formatSpeed(now) : "—"}
+        </span>
+      </div>
+      <svg viewBox={`0 0 ${W} ${H}`} preserveAspectRatio="none" className="w-full h-[72px]"
+           role="img" aria-label="مخطط السرعة المزدوج">
+        <defs>
+          <linearGradient id="wave-avg" x1="0" y1="0" x2="1" y2="0">
+            <stop offset="0%" stopColor="#22d3ee" /><stop offset="100%" stopColor="#22d3ee" />
+          </linearGradient>
+        </defs>
+        <polyline points={avgWave} fill="none" stroke="url(#wave-avg)" strokeWidth="1.5"
+                  strokeDasharray="5 5" opacity="0.7" />
+        <polyline points={wave} fill="none" stroke="#34d399" strokeWidth="2.5"
+                  strokeLinejoin="round" strokeLinecap="round"
+                  style={{ filter: "drop-shadow(0 0 4px rgba(52,211,153,.55))" }} />
+      </svg>
     </div>
   );
 }

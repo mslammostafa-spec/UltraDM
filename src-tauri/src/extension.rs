@@ -414,6 +414,7 @@ fn browser_installed(browser: &str) -> bool {
         _ => "opera.exe",
     };
     use winreg::enums::{HKEY_CURRENT_USER, HKEY_LOCAL_MACHINE};
+    use winreg::RegKey;
     for hk in [HKEY_CURRENT_USER, HKEY_LOCAL_MACHINE] {
         if RegKey::predef(hk)
             .open_subkey(format!(r"Software\Microsoft\Windows\CurrentVersion\App Paths\{exe}"))

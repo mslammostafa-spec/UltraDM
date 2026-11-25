@@ -7,8 +7,8 @@
   if (window.__ultradm_floating) return;
   window.__ultradm_floating = true;
 
-  let theme = { accent: "#3b82f6", glow: "#8b5cf6" };
-  let lastLabel = "فتح في UltraDM";
+  let theme = { accent: "#34d399", glow: "#22d3ee" };
+  let lastLabel = "تحميل عبر UltraDM";
 
   chrome.storage.local.get(["theme"], (s) => {
     if (s.theme && s.theme.accent) theme = s.theme;
@@ -16,16 +16,25 @@
   chrome.runtime.onMessage.addListener((m) => {
     if (m.type === "ultradm://theme" && m.theme) theme = m.theme;
     if (m.type === "ultradm://status") {
-      lastLabel = m.status === "online" ? "فتح في UltraDM" : "UltraDM غير متصل";
+      lastLabel = m.status === "online" ? "تحميل عبر UltraDM" : "UltraDM غير متصل";
       document.querySelectorAll(".ultradm-fab").forEach(hydrate);
     }
   });
+
+  const HEX_SVG =
+    '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" aria-hidden="true">' +
+    '<defs><linearGradient id="ultradm-hex" x1="0" y1="0" x2="1" y2="1">' +
+    '<stop offset="0%" stop-color="#34d399"/><stop offset="100%" stop-color="#22d3ee"/></linearGradient></defs>' +
+    '<path d="M12 2l8.66 5v10L12 22l-8.66-5V7z" stroke="url(#ultradm-hex)" stroke-width="1.8"/>' +
+    '<path d="M12 7v7m-3-4 3 3 3-3" stroke="url(#ultradm-hex)" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>';
 
   const MEDIA_HOSTS = /(^|\.)(youtube\.com|youtube-nocookie\.com|facebook\.com|fb\.watch|instagram\.com|tiktok\.com|twitter\.com|x\.com|reddit\.com|vimeo\.com|dailymotion\.com|twitch\.tv)$/i;
 
   function hydrate(btn) {
     btn.style.setProperty("--ultradm-accent", theme.accent);
     btn.style.setProperty("--ultradm-glow", theme.glow);
+    const label = btn.querySelector(".ultradm-fab-label");
+    if (label) label.textContent = lastLabel;
     btn.title = lastLabel;
     btn.setAttribute("aria-label", lastLabel);
   }
@@ -43,9 +52,16 @@
   }
 
   function flash(btn, text) {
-    const old = btn.title;
+    const label = btn.querySelector(".ultradm-fab-label");
+    const old = label ? label.textContent : btn.title;
+    if (label) label.textContent = text;
     btn.title = text;
-    setTimeout(() => (btn.title = old), 1500);
+    btn.setAttribute("data-visible", "");
+    setTimeout(() => {
+      if (label) label.textContent = old;
+      btn.title = old;
+      btn.removeAttribute("data-visible");
+    }, 1800);
   }
 
   // يبحث عن أقرب مشغل وسائط لنقطة تركيز في الصفحة.
@@ -67,9 +83,8 @@
     const btn = document.createElement("button");
     btn.className = "ultradm-fab";
     hydrate(btn);
-    btn.innerHTML =
-      '<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' +
-      '<path d="M12 3v12"/><path d="m7 10 5 5 5-5"/><path d="M5 21h14"/></svg>';
+    btn.innerHTML = HEX_SVG + '<span class="ultradm-fab-label"></span>';
+    hydrate(btn);
     btn.addEventListener("click", (ev) => {
       ev.preventDefault();
       ev.stopPropagation();

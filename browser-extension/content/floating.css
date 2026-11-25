@@ -1,38 +1,48 @@
-/* UltraDM — الزر العائم: يتبع ثيم البرنامج عبر المتغيرات --ultradm-accent/--ultradm-glow */
+/* UltraDM — الزر العائم: كبسولة زجاجية داكنة بحواف متوهجة، تتبع ثيم البرنامج عبر --ultradm-accent/--ultradm-glow */
 .ultradm-fab {
-  --ultradm-accent: #3b82f6;
-  --ultradm-glow: #8b5cf6;
+  --ultradm-accent: #34d399;
+  --ultradm-glow: #22d3ee;
   position: absolute !important;
   z-index: 2147483646 !important;
   top: 10px !important;
   right: 10px !important;
-  width: 40px !important;
-  height: 40px !important;
-  min-height: 40px !important;
-  padding: 0 !important;
-  border-radius: 12px !important;
-  border: 1px solid color-mix(in srgb, var(--ultradm-accent) 45%, transparent) !important;
+  height: 34px !important;
+  min-height: 34px !important;
+  padding: 0 12px 0 14px !important;
+  border-radius: 999px !important;
+  border: 1px solid color-mix(in srgb, var(--ultradm-accent) 55%, transparent) !important;
   background: linear-gradient(
     135deg,
-    color-mix(in srgb, var(--ultradm-accent) 85%, black),
-    var(--ultradm-glow)
+    rgba(10, 18, 16, 0.92),
+    rgba(8, 20, 26, 0.92)
   ) !important;
-  color: #fff !important;
-  display: grid !important;
-  place-items: center !important;
+  backdrop-filter: blur(8px) saturate(1.3);
+  -webkit-backdrop-filter: blur(8px) saturate(1.3);
+  color: #eafff5 !important;
+  display: inline-flex !important;
+  align-items: center !important;
+  gap: 7px !important;
+  font: 600 12px/1 "Segoe UI", Tahoma, sans-serif !important;
+  letter-spacing: 0.2px !important;
   cursor: pointer !important;
   opacity: 0;
   transition: opacity 150ms ease, transform 150ms ease, box-shadow 150ms ease;
-  box-shadow: 0 4px 18px color-mix(in srgb, var(--ultradm-glow) 45%, transparent) !important;
+  box-shadow:
+    0 4px 18px color-mix(in srgb, var(--ultradm-glow) 40%, transparent),
+    0 0 0 1px color-mix(in srgb, var(--ultradm-glow) 25%, transparent),
+    inset 0 1px 0 rgba(255, 255, 255, 0.12) !important;
   pointer-events: auto !important;
 }
 
 .ultradm-fab:hover,
 .ultradm-fab:focus-visible {
   opacity: 1 !important;
-  transform: translateY(-1px) scale(1.05);
-  outline: 2px solid var(--ultradm-accent) !important;
+  transform: translateY(-1px);
+  outline: 2px solid var(--ultradm-glow) !important;
   outline-offset: 2px !important;
+  box-shadow:
+    0 6px 22px color-mix(in srgb, var(--ultradm-glow) 55%, transparent),
+    0 0 10px color-mix(in srgb, var(--ultradm-accent) 45%, transparent) !important;
 }
 
 .ultradm-fab:active {
@@ -48,6 +58,12 @@ video:hover ~ .ultradm-fab,
 
 .ultradm-fab svg {
   display: block;
+  flex: none;
+}
+
+.ultradm-fab .ultradm-fab-label {
+  white-space: nowrap;
+  user-select: none;
 }
 
 @media (prefers-reduced-motion: reduce) {
