@@ -151,6 +151,71 @@ export const THEMES: Theme[] = [
       shadow1: "0 1px 2px rgba(0,0,0,.5)", shadow2: "0 12px 32px rgba(0,0,0,.35)",
     },
   },
+  {
+    id: "glass-teal-lagoon",
+    name: "Glass Teal Lagoon",
+    desc: "زجاجي فيروزي شفاف بلمسة بحرية هادئة",
+    dark: true,
+    swatch: ["#03181c", "#2dd4bf", "#67e8f9"],
+    vars: {
+      bg: "#021114", surface: "#052025", surface2: "#0a2f34", text: "#e0f7f5",
+      muted: "#84b0ad", border: "#12444a", accent: "#2dd4bf", accentStrong: "#14b8a6",
+      torrent: "#67e8f9", ok: "#4ade80",
+      shadow1: "0 1px 2px rgba(0,0,0,.55)", shadow2: "0 12px 36px rgba(45,212,191,.18)",
+    },
+  },
+  {
+    id: "glass-violet-crystal",
+    name: "Glass Violet Crystal",
+    desc: "زجاجي بنفسجي كريستالي متوهج وشفاف",
+    dark: true,
+    swatch: ["#12061f", "#a855f7", "#d8b4fe"],
+    vars: {
+      bg: "#0c0418", surface: "#150a2a", surface2: "#1f1240", text: "#f2eaff",
+      muted: "#a98fc9", border: "#33205c", accent: "#a855f7", accentStrong: "#9333ea",
+      torrent: "#d8b4fe", ok: "#4ade80",
+      shadow1: "0 1px 2px rgba(0,0,0,.55)", shadow2: "0 12px 36px rgba(168,85,247,.2)",
+    },
+  },
+  {
+    id: "glass-smoky-silver",
+    name: "Glass Smoky Silver",
+    desc: "زجاجي رمادي دخاني شفاف بلمسة فضية",
+    dark: true,
+    swatch: ["#121417", "#c0c8d4", "#8ab4f8"],
+    vars: {
+      bg: "#0d0f12", surface: "#16191d", surface2: "#1f242a", text: "#e9edf3",
+      muted: "#98a2ae", border: "#2d343d", accent: "#c0c8d4", accentStrong: "#8ab4f8",
+      torrent: "#8ab4f8", ok: "#6cc576",
+      shadow1: "0 1px 2px rgba(0,0,0,.55)", shadow2: "0 12px 36px rgba(138,180,248,.14)",
+    },
+  },
+  {
+    id: "glass-rose-blush",
+    name: "Glass Rose Blush",
+    desc: "زجاجي وردي فاتح أنيق وناعم (نهاري)",
+    dark: false,
+    swatch: ["#fdf3f5", "#f43f5e", "#fbcfe8"],
+    vars: {
+      bg: "#fbf1f3", surface: "#ffffff", surface2: "#f9e8ec", text: "#2b1a20",
+      muted: "#8a6b74", border: "#f0dae0", accent: "#f43f5e", accentStrong: "#e11d48",
+      torrent: "#ec4899", ok: "#0f8a5f",
+      shadow1: "0 1px 2px rgba(70,30,40,.07)", shadow2: "0 12px 32px rgba(244,63,94,.12)",
+    },
+  },
+  {
+    id: "glass-amber-ember",
+    name: "Glass Amber Ember",
+    desc: "زجاجي كهرماني دافئ بوهج جمرات الليل",
+    dark: true,
+    swatch: ["#1c1103", "#f59e0b", "#fcd34d"],
+    vars: {
+      bg: "#150d02", surface: "#221604", surface2: "#31210a", text: "#fdf1dc",
+      muted: "#c2a280", border: "#4a3312", accent: "#f59e0b", accentStrong: "#d97706",
+      torrent: "#fcd34d", ok: "#a3e635",
+      shadow1: "0 1px 2px rgba(0,0,0,.55)", shadow2: "0 12px 36px rgba(245,158,11,.18)",
+    },
+  },
 ];
 
 export const DEFAULT_THEME_ID = "emerald-luxury";

@@ -30,7 +30,7 @@
     btn.setAttribute("aria-label", lastLabel);
   }
 
-  function openInUltraDM(url, pageUrl) {
+  function openInUltraDM(url, pageUrl, btn) {
     chrome.runtime.sendMessage({
       type: "capture",
       kind: "media",
@@ -74,7 +74,7 @@
       ev.preventDefault();
       ev.stopPropagation();
       const url = currentMediaUrl(container);
-      if (url) openInUltraDM(url);
+      if (url) openInUltraDM(url, pageUrl, btn);
     });
     return btn;
   }

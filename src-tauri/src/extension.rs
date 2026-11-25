@@ -274,7 +274,7 @@ pub fn extension_binding_status() -> ExtensionBindingStatus {
         .iter()
         .map(|(name, key)| BrowserBinding {
             browser: name,
-            installed: registry_key_exists(key),
+            installed: browser_installed(name),
             host_registered: registry_key_exists(&format!("{key}\\{NATIVE_HOST_NAME}")),
         })
         .collect();
@@ -358,6 +358,71 @@ fn registry_key_exists(key: &str) -> bool {
     RegKey::predef(HKEY_CURRENT_USER)
         .open_subkey(key)
         .is_ok()
+}
+
+/// هل المتصفح مُثبَّت فعليًا؟ نفحص مسارات البرامج (Program Files و
+/// LocalAppData) ومفتاح App Paths في السجل — وليس مفتاح الربط فقط،
+/// لأن مفتاح NativeMessagingHosts لا يوجد قبل أول ربط.
+#[cfg(target_os = "windows")]
+fn browser_installed(browser: &str) -> bool {
+    use std::path::PathBuf;
+
+    let exe_candidates: &[&[&str]] = &[
+        // Chrome
+        &[
+            r"Google\Chrome\Application\chrome.exe",
+            r"Google\Chrome Beta\Application\chrome.exe",
+        ],
+        // Edge
+        &[r"Microsoft\Edge\Application\msedge.exe"],
+        // Brave
+        &[
+            r"BraveSoftware\Brave-Browser\Application\brave.exe",
+            r"BraveSoftware\Brave-Browser-Beta\Application\brave.exe",
+        ],
+        // Opera
+        &[
+            r"Opera\opera.exe",
+            r"Opera\launcher.exe",
+        ],
+    ];
+    let idx = match browser {
+        "Chrome" => 0,
+        "Edge" => 1,
+        "Brave" => 2,
+        _ => 3,
+    };
+
+    let pf = std::env::var("ProgramFiles").unwrap_or_else(|_| r"C:\Program Files".into());
+    let pf86 =
+        std::env::var("ProgramFiles(x86)").unwrap_or_else(|_| r"C:\Program Files (x86)".into());
+    let lad = std::env::var("LOCALAPPDATA")
+        .unwrap_or_else(|_| format!(r"{}\AppData\Local", std::env::var("USERPROFILE").unwrap_or_default()));
+    for base in [pf, pf86, lad] {
+        for rel in exe_candidates[idx] {
+            if PathBuf::from(&base).join(rel).exists() {
+                return true;
+            }
+        }
+    }
+
+    // آخر ملجأ: App Paths في السجل (HKCU ثم HKLM).
+    let exe = match browser {
+        "Chrome" => "chrome.exe",
+        "Edge" => "msedge.exe",
+        "Brave" => "brave.exe",
+        _ => "opera.exe",
+    };
+    use winreg::enums::{HKEY_CURRENT_USER, HKEY_LOCAL_MACHINE};
+    for hk in [HKEY_CURRENT_USER, HKEY_LOCAL_MACHINE] {
+        if RegKey::predef(hk)
+            .open_subkey(format!(r"Software\Microsoft\Windows\CurrentVersion\App Paths\{exe}"))
+            .is_ok()
+        {
+            return true;
+        }
+    }
+    false
 }
 
 #[cfg(test)]

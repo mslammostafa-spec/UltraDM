@@ -142,7 +142,7 @@ function scheduleReconnect() {
 
 function cookiesFor(url) {
   return new Promise((resolve) => {
-    if (isMagnet(url)) return resolve([]);
+    if (S.isMagnet(url)) return resolve([]);
     try {
       const u = new URL(url);
       chrome.cookies.getAll({ url: u.origin }, (c) => resolve(c || []));
