@@ -266,16 +266,16 @@ pub fn extension_binding_status() -> ExtensionBindingStatus {
     #[cfg(target_os = "windows")]
     {
         let browsers = [
-            ("Chrome", "Software\\Google\\Chrome\\NativeMessagingHosts"),
-            ("Edge", "Software\\Microsoft\\Edge\\NativeMessagingHosts"),
-            ("Brave", "Software\\BraveSoftware\\Brave\\NativeMessagingHosts"),
-            ("Opera", "Software\\Opera Software\\NativeMessagingHosts"),
+            ("Chrome", "HKCU\\Software\\Google\\Chrome\\NativeMessagingHosts"),
+            ("Edge", "HKCU\\Software\\Microsoft\\Edge\\NativeMessagingHosts"),
+            ("Brave", "HKCU\\Software\\BraveSoftware\\Brave\\NativeMessagingHosts"),
+            ("Opera", "HKCU\\Software\\Opera Software\\NativeMessagingHosts"),
         ]
         .iter()
         .map(|(name, key)| BrowserBinding {
             browser: name,
-            installed: browser_installed(name),
-            host_registered: registry_key_exists(&format!("HKCU\\{key}\\{NATIVE_HOST_NAME}")),
+            installed: registry_key_exists(key),
+            host_registered: registry_key_exists(&format!("{key}\\{NATIVE_HOST_NAME}")),
         })
         .collect();
         ExtensionBindingStatus {
@@ -298,103 +298,7 @@ pub fn extension_binding_status() -> ExtensionBindingStatus {
     }
 }
 
-/// فتح مجلد الإضافة في مستكشف الملفات ليُفعّلها المستخدم مرة واحدة عبر Load unpacked.
-#[tauri::command]
-pub fn extension_open_extension_folder() -> Result<String, String> {
-    let dir = extension_folder().ok_or_else(|| "لم يُعثر على مجلد الإضافة (browser-extension)".to_string())?;
-    #[cfg(target_os = "windows")]
-    {
-        std::process::Command::new("explorer")
-            .arg(&dir)
-            .spawn()
-            .map_err(|e| format!("تعذّر فتح Explorer: {e}"))?;
-    }
-    #[cfg(not(target_os = "windows"))]
-    {
-        std::process::Command::new("xdg-open")
-            .arg(&dir)
-            .spawn()
-            .map_err(|e| format!("تعذّر فتح المجلد: {e}"))?;
-    }
-    Ok(dir.display().to_string())
-}
-
-/// مسار مجلد الإضافة: بجانب الملف التنفيذي في الحزمة، أو مجلد المشروع أثناء التطوير.
-fn extension_folder() -> Option<std::path::PathBuf> {
-    if let Ok(exe) = std::env::current_exe() {
-        if let Some(d) = exe.parent().map(|p| p.join("browser-extension")) {
-            if d.is_dir() {
-                return Some(d);
-            }
-        }
-    }
-    let dev = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-        .parent()?
-        .join("browser-extension");
-    dev.is_dir().then_some(dev)
-}
-
-/// هل المتصفح مثبّت فعلاً؟ نبحث عن الملف التنفيذي في المسارات الشائعة
-/// (Program Files وProgram Files (x86) وLocalAppData) ثم في مفتاح App Paths.
-#[cfg(target_os = "windows")]
-fn browser_installed(name: &str) -> bool {
-    let exe = match name {
-        "Chrome" => "chrome.exe",
-        "Edge" => "msedge.exe",
-        "Brave" => "brave.exe",
-        _ => "opera.exe",
-    };
-
-    // 1) App Paths في HKLM وHKCU — الأدق لأنه ما يسجّله المثبّت نفسه.
-    use winreg::enums::{HKEY_CURRENT_USER, HKEY_LOCAL_MACHINE};
-    for hive in [HKEY_LOCAL_MACHINE, HKEY_CURRENT_USER] {
-        if let Ok(k) = winreg::RegKey::predef(hive)
-            .open_subkey(format!("SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\App Paths\\{exe}"))
-        {
-            if let Ok(p) = k.get_value::<String, _>("") {
-                if !p.is_empty() && std::path::Path::new(&p).is_file() {
-                    return true;
-                }
-            }
-        }
-    }
-
-    // 2) المسارات الشائعة على القرص.
-    let pf = std::env::var("ProgramFiles").unwrap_or_else(|_| "C:\\Program Files".into());
-    let pf86 = std::env::var("ProgramFiles(x86)").unwrap_or_else(|_| "C:\\Program Files (x86)".into());
-    let lad = std::env::var("LOCALAPPDATA").unwrap_or_else(|_| {
-        std::env::var("USERPROFILE")
-            .map(|u| format!("{u}\\AppData\\Local"))
-            .unwrap_or_default()
-    });
-    let roots: Vec<String> = match name {
-        "Chrome" => vec![
-            format!("{pf}\\Google\\Chrome"),
-            format!("{pf86}\\Google\\Chrome"),
-            format!("{lad}\\Google\\Chrome"),
-        ],
-        "Edge" => vec![
-            format!("{pf}\\Microsoft\\Edge"),
-            format!("{pf86}\\Microsoft\\Edge"),
-            format!("{lad}\\Microsoft\\Edge"),
-        ],
-        "Brave" => vec![
-            format!("{pf}\\BraveSoftware\\Brave-Browser"),
-            format!("{pf86}\\BraveSoftware\\Brave-Browser"),
-            format!("{lad}\\BraveSoftware\\Brave-Browser"),
-        ],
-        _ => vec![
-            format!("{pf}\\Opera"),
-            format!("{pf86}\\Opera"),
-            format!("{lad}\\Programs\\Opera"),
-        ],
-    };
-    roots
-        .iter()
-        .any(|d| std::path::Path::new(&format!("{d}\\{exe}")).is_file())
-}
-
-/// كتابة مفاتيح Native Messaging لكل متصفح مثبّت (ويندوز).
+/// كتابة مفاتيح Native Messaging لكل المتصفحات المثبتة (ويندوز).
 #[tauri::command]
 pub fn extension_register_browsers() -> Result<Vec<BrowserBinding>, String> {
     let manifest = write_native_manifest()?;
@@ -409,19 +313,11 @@ pub fn extension_register_browsers() -> Result<Vec<BrowserBinding>, String> {
             ("Brave", "Software\\BraveSoftware\\Brave\\NativeMessagingHosts"),
             ("Opera", "Software\\Opera Software\\NativeMessagingHosts"),
         ];
-        let mut registered_any = false;
-        for (name, sub) in browsers {
-            if !browser_installed(name) {
-                continue;
-            }
+        for (_, sub) in browsers {
             let (k, _) = hkcu
                 .create_subkey(format!("{sub}\\{NATIVE_HOST_NAME}"))
                 .map_err(|e| e.to_string())?;
             k.set_value("", &manifest.display().to_string()).map_err(|e| e.to_string())?;
-            registered_any = true;
-        }
-        if !registered_any {
-            return Err("لم يُعثر على أي متصفح مثبّت (Chrome / Edge / Brave / Opera)".into());
         }
         Ok(extension_binding_status().browsers)
     }
@@ -433,14 +329,6 @@ pub fn extension_register_browsers() -> Result<Vec<BrowserBinding>, String> {
 }
 
 fn native_manifest_path() -> std::path::PathBuf {
-    // مسار ثابت لا يمسحه النظام (مجلد Temp قد يُنظَّف) — مطلوب لأن السجل يشير إليه دائمًا.
-    #[cfg(target_os = "windows")]
-    if let Ok(lad) = std::env::var("LOCALAPPDATA") {
-        let d = std::path::PathBuf::from(lad).join("UltraDM");
-        if std::fs::create_dir_all(&d).is_ok() {
-            return d.join("ultradm-native-host.json");
-        }
-    }
     std::env::temp_dir().join("ultradm-native-host.json")
 }
 

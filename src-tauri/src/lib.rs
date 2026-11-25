@@ -235,7 +235,6 @@ pub fn run() {
             scheduler::scheduler_set_rules,
             extension::extension_binding_status,
             extension::extension_register_browsers,
-            extension::extension_open_extension_folder,
             cancel_shutdown
         ])
         .run(tauri::generate_context!())
