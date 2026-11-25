@@ -40,10 +40,6 @@
       "webviewInstallMode": {
         "type": "downloadBootstrapper"
       },
-      "wix": {
-        "language": "en-US",
-        "installMode": "perMachine"
-      },
       "allowDowngrades": false
     }
   },
