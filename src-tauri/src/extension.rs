@@ -341,7 +341,7 @@ fn write_native_manifest() -> Result<std::path::PathBuf, String> {
         "path": exe.display().to_string(),
         "type": "stdio",
         "allowed_origins": [
-            "chrome-extension://plknndnfnpeeiioc/",
+            "chrome-extension://kpjldkbninldcnhfjnbpbenejifihobc/",
         ]
     });
     let path = native_manifest_path();

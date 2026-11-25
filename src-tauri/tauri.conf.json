@@ -43,13 +43,17 @@
     "createUpdaterArtifacts": false,
     "targets": ["nsis", "msi"],
     "icon": ["icons/icon.ico"],
+    "resources": {
+      "../browser-extension/": "browser-extension/"
+    },
     "windows": {
       "webviewInstallMode": { "type": "embedBootstrapper" },
       "nsis": {
         "languages": ["Arabic", "English"],
         "displayLanguageSelector": true,
         "installMode": "currentUser",
-        "compression": "lzma"
+        "compression": "lzma",
+        "installerHooks": "./installer-hooks.nsh"
       }
     }
   }
