@@ -48,6 +48,7 @@ export default function SettingsDialog({
   const [saving, setSaving] = useState(false);
   const [ext, setExt] = useState<ExtensionStatus | null>(null);
   const [extBusy, setExtBusy] = useState(false);
+  const [extMsg, setExtMsg] = useState<{ ok: boolean; text: string } | null>(null);
 
   const loadExt = () =>
     invoke<ExtensionStatus>("extension_binding_status")
@@ -56,13 +57,26 @@ export default function SettingsDialog({
 
   const registerExt = async () => {
     setExtBusy(true);
+    setExtMsg(null);
     try {
       const r = await invoke<BrowserBinding[]>("extension_register_browsers");
       setExt((s) => (s ? { ...s, browsers: r } : s));
-    } catch {
-      /* غير متاح خارج ويندوز */
+      const linked = r.filter((b) => b.hostRegistered).length;
+      setExtMsg({ ok: true, text: `تم تثبيت الربط بنجاح في ${linked} متصفح — أعد تشغيل المتصفح ليقرأ المضيف.` });
+    } catch (e) {
+      setExtMsg({ ok: false, text: `فشل تثبيت الربط: ${typeof e === "string" ? e : "خطأ غير متوقع"}` });
     } finally {
       setExtBusy(false);
+    }
+  };
+
+  const openExtFolder = async () => {
+    setExtMsg(null);
+    try {
+      const dir = await invoke<string>("extension_open_extension_folder");
+      setExtMsg({ ok: true, text: `مجلد الإضافة: ${dir} — فعّلها مرة واحدة كما في الخطوات أدناه.` });
+    } catch (e) {
+      setExtMsg({ ok: false, text: `تعذّر فتح المجلد: ${typeof e === "string" ? e : "خطأ غير متوقع"}` });
     }
   };
 
@@ -229,6 +243,13 @@ export default function SettingsDialog({
                 </span>
               </span>
               <button
+                onClick={openExtFolder}
+                className="rounded-xl h-10 px-4 text-[12.5px] font-semibold cursor-pointer hover:brightness-110 disabled:opacity-50"
+                style={{ background: "var(--surface-2)", color: "var(--text)", border: "1px solid var(--border)" }}
+              >
+                فتح مجلد الإضافة
+              </button>
+              <button
                 onClick={registerExt}
                 disabled={extBusy}
                 className="rounded-xl h-10 px-4 text-[12.5px] font-semibold cursor-pointer hover:brightness-110 disabled:opacity-50"
@@ -237,6 +258,22 @@ export default function SettingsDialog({
                 {extBusy ? "جارٍ التثبيت…" : "تثبيت الربط تلقائياً"}
               </button>
             </div>
+            {extMsg && (
+              <p
+                role="status"
+                className="rounded-xl border px-3 py-2 text-[12px] leading-5 mb-3"
+                style={{
+                  borderColor: extMsg.ok ? "#34d39966" : "#f8717166",
+                  color: extMsg.ok ? "#34d399" : "#f87171",
+                  background: extMsg.ok ? "#34d39911" : "#f8717111",
+                }}
+              >
+                {extMsg.text}
+              </p>
+            )}
+            <p className="text-[12px] leading-5 mb-3" style={{ color: "var(--muted)" }}>
+              لتفعيل الإضافة مرة واحدة: افتح المجلد أعلاه، ثم في المتصفح <span dir="ltr" style={{ fontFamily: "monospace" }}>chrome://extensions</span> → فعّل «Developer mode» → «Load unpacked» واختر مجلد الإضافة.
+            </p>
             {ext && (
               <ul className="grid grid-cols-2 min-[560px]:grid-cols-4 gap-2">
                 {ext.browsers.map((b) => (
