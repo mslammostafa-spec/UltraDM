@@ -39,6 +39,10 @@ jobs:
       - name: Install frontend dependencies
         run: npm install
 
+      - name: Build browser extension zip (bundled inside installers via tauri resources)
+        if: matrix.target == 'x86_64-pc-windows-msvc'
+        run: node scripts/zip-extension.mjs
+
       - name: Build Tauri app (NSIS installer)
         uses: tauri-apps/tauri-action@v0
         env:
@@ -57,10 +61,6 @@ jobs:
           npx tauri build --config src-tauri/tauri.microsoftstore.conf.json --target ${{ matrix.target }}
           mkdir -p store-package
           cp src-tauri/target/${{ matrix.target }}/release/bundle/msi/*.msi store-package/UltraDM-Store-x64.msi
-
-      - name: Zip browser extension for Edge Add-ons / Chrome Web Store
-        if: matrix.target == 'x86_64-pc-windows-msvc'
-        run: node scripts/zip-extension.mjs
 
       - name: Upload store package and extension zip as artifacts
         if: matrix.target == 'x86_64-pc-windows-msvc'
