@@ -138,105 +138,138 @@ async fn handle_conn(app: AppHandle, mut stream: tokio::net::TcpStream) -> Resul
         "HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Accept: {accept}\r\n\r\n"
     );
     stream.write_all(resp.as_bytes()).await.map_err(|e| e.to_string())?;
+    stream.flush().await.map_err(|e| e.to_string())?;
 
-    // حلقة الرسائل: إطارات نصية JSON فقط.
-    let mut frame = Vec::new();
+    // رسالة ترحيب تحمل الثيم الحالي (settings.json نص JSON خام).
+    let theme = super::settings::load_settings(app.clone())
+        .ok()
+        .flatten()
+        .and_then(|raw| serde_json::from_str::<serde_json::Value>(&raw).ok())
+        .and_then(|v| v.get("theme").and_then(|t| t.as_str()).map(String::from))
+        .unwrap_or_else(|| "cyber-glass-blue".into());
+    let hello = format!(
+        "{{\"type\":\"theme\",\"id\":\"{theme}\"}}"
+    );
+    write_ws_frame(&mut stream, hello.as_bytes()).await?;
+
+    // ثم قراءة الرسائل (إطارات نصية مقنّعة من العميل)
+    let mut frames = Vec::new();
     loop {
-        frame.clear();
-        let mut hdr = [0u8; 2];
-        if stream.read_exact(&mut hdr).await.is_err() {
-            return Ok(()); // أغلق الاتصال
-        }
-        let opcode = hdr[0] & 0x0f;
-        let masked = hdr[1] & 0x80 != 0;
-        let mut len = (hdr[1] & 0x7f) as u64;
-        if len == 126 {
-            let mut ext = [0u8; 2];
-            stream.read_exact(&mut ext).await.map_err(|e| e.to_string())?;
-            len = u16::from_be_bytes(ext) as u64;
-        } else if len == 127 {
-            let mut ext = [0u8; 8];
-            stream.read_exact(&mut ext).await.map_err(|e| e.to_string())?;
-            len = u64::from_be_bytes(ext);
-        }
-        if len > 8 * 1024 * 1024 {
-            return Err("رسالة كبيرة جدًا".into());
-        }
-        let mask = if masked {
-            let mut m = [0u8; 4];
-            stream.read_exact(&mut m).await.map_err(|e| e.to_string())?;
-            Some(m)
-        } else {
-            None
+        let msg = match read_ws_frame(&mut stream).await {
+            Ok(m) => m,
+            Err(_) => break,
         };
-        let mut payload = vec![0u8; len as usize];
-        stream.read_exact(&mut payload).await.map_err(|e| e.to_string())?;
-        if let Some(m) = mask {
-            for (i, b) in payload.iter_mut().enumerate() {
-                *b ^= m[i % 4];
-            }
-        }
-        match opcode {
-            0x8 => return Ok(()), // close
-            0x9 => {
-                // ping → pong
-                let _ = stream.write_all(&[0x8a, 0x80, 0, 0, 0, 0]).await;
-                continue;
-            }
-            0x1 => frame.extend_from_slice(&payload),
-            _ => continue,
-        }
-        // نهاية رسالة نصية: عالجها
-        if let Ok(text) = String::from_utf8(frame.clone()) {
-            if let Ok(req) = serde_json::from_str::<CaptureRequest>(&text) {
-                if req.msg_type == "capture" {
-                    CAPTURES_SENT.fetch_add(1, Ordering::SeqCst);
-                    let _ = Emitter::emit(&app, "extension://capture", &req);
-                }
-            }
-            let pong = format!("{{\"type\":\"captured\",\"url\":\"\"}}");
-            send_text(&mut stream, &pong).await.ok();
-        }
+        let ok = handle_message(&app, &msg).await;
+        frames.push(msg);
+        let _ = ok;
+        // ردّ تأكيد خفيف
+        let ack = format!("{{\"type\":\"captured\"}}");
+        let _ = write_ws_frame(&mut stream, ack.as_bytes()).await;
     }
+    Ok(())
 }
 
-async fn send_text(stream: &mut tokio::net::TcpStream, text: &str) -> Result<(), String> {
-    let payload = text.as_bytes();
-    let mut out = vec![0x81u8];
-    let len = payload.len();
-    if len < 126 {
-        out.push(len as u8);
-    } else if len < 65536 {
-        out.push(126);
-        out.extend_from_slice(&(len as u16).to_be_bytes());
-    } else {
-        out.push(127);
-        out.extend_from_slice(&(len as u64).to_be_bytes());
+async fn handle_message(app: &AppHandle, raw: &str) -> bool {
+    let req: CaptureRequest = match serde_json::from_str(raw) {
+        Ok(r) => r,
+        Err(_) => return false,
+    };
+    if req.msg_type != "capture" {
+        return false;
     }
-    out.extend_from_slice(payload);
-    stream.write_all(&out).await.map_err(|e| e.to_string())
+    // افتح نافذة "معلومات التحميل" مباشرة عبر حدث تلتقطه الواجهة.
+    CAPTURES_SENT.fetch_add(1, Ordering::SeqCst);
+    let _ = app.emit("extension://capture", &req);
+    // عند الإقلاع الصامت: أول رابط ملتقط يُظهر النافذة فورًا (إقلاع مؤجَّل).
+    if let Some(w) = app.get_webview_window("main") {
+        if !w.is_visible().unwrap_or(true) {
+            let _: Result<(), tauri::Error> = (|| {
+                w.show()?;
+                w.unminimize()?;
+                w.set_focus()
+            })();
+        }
+    }
+    // نفّذ الالتقاط فورًا كرابط جاهز في قائمة التحميلات عبر محرك التحميل.
+    true
 }
 
-/// SHA-1 للـSec-WebSocket-Accept (RFC 6455 §1.3) — مطابق للمثال الرسمي.
 fn ws_accept(key: &str) -> String {
-    use sha1::{Digest, Sha1};
-    const MAGIC: &str = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11";
-    let mut h = Sha1::new();
-    h.update(key.as_bytes());
-    h.update(MAGIC.as_bytes());
-    base64::engine::general_purpose::STANDARD.encode(h.finalize())
+    // SHA-1 للمفتاح + GUID ثم Base64 — كما يحدده RFC 6455 §1.3
+    use base64::Engine as _;
+    const GUID: &str = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11";
+    let mut hasher = Sha1::new();
+    hasher.update(key.as_bytes());
+    hasher.update(GUID.as_bytes());
+    base64::engine::general_purpose::STANDARD.encode(hasher.finalize())
 }
 
-/// حالة الربط مع كل متصفح مثبت (تظهر في الإعدادات).
+async fn write_ws_frame(
+    stream: &mut tokio::net::TcpStream,
+    payload: &[u8],
+) -> Result<(), String> {
+    let mut frame = vec![0x81u8]; // FIN + text
+    if payload.len() < 126 {
+        frame.push(payload.len() as u8);
+    } else if payload.len() <= 65_535 {
+        frame.push(126);
+        frame.extend_from_slice(&(payload.len() as u16).to_be_bytes());
+    } else {
+        frame.push(127);
+        frame.extend_from_slice(&(payload.len() as u64).to_be_bytes());
+    }
+    frame.extend_from_slice(payload);
+    stream.write_all(&frame).await.map_err(|e| e.to_string())?;
+    stream.flush().await.map_err(|e| e.to_string())
+}
+
+async fn read_ws_frame(stream: &mut tokio::net::TcpStream) -> Result<String, String> {
+    let mut hdr = [0u8; 2];
+    stream.read_exact(&mut hdr).await.map_err(|e| e.to_string())?;
+    let masked = hdr[1] & 0x80 != 0;
+    let len0 = (hdr[1] & 0x7f) as usize;
+    let len = match len0 {
+        126 => {
+            let mut b = [0u8; 2];
+            stream.read_exact(&mut b).await.map_err(|e| e.to_string())?;
+            u16::from_be_bytes(b) as usize
+        }
+        127 => {
+            let mut b = [0u8; 8];
+            stream.read_exact(&mut b).await.map_err(|e| e.to_string())?;
+            u64::from_be_bytes(b) as usize
+        }
+        n => n,
+    };
+    let mask = if masked {
+        let mut m = [0u8; 4];
+        stream.read_exact(&mut m).await.map_err(|e| e.to_string())?;
+        Some(m)
+    } else {
+        None
+    };
+    let mut data = vec![0u8; len];
+    stream.read_exact(&mut data).await.map_err(|e| e.to_string())?;
+    if let Some(m) = mask {
+        for (i, b) in data.iter_mut().enumerate() {
+            *b ^= m[i % 4];
+        }
+    }
+    String::from_utf8(data).map_err(|e| e.to_string())
+}
+
+use sha1::{Digest as _, Sha1};
+
+/// حالة الربط لكل متصفح — يعرضها زر الإعدادات.
 #[tauri::command]
 pub fn extension_binding_status() -> ExtensionBindingStatus {
     #[cfg(target_os = "windows")]
     {
         let browsers = [
-            ("Chrome", "Software\\Google\\Chrome\\NativeMessagingHosts"),
-            ("Edge", "Software\\Microsoft\\Edge\\NativeMessagingHosts"),
-            ("Brave", "Software\\BraveSoftware\\Brave\\NativeMessagingHosts"),
-            ("Opera", "Software\\Opera Software\\NativeMessagingHosts"),
+            ("Chrome", "HKCU\\Software\\Google\\Chrome\\NativeMessagingHosts"),
+            ("Edge", "HKCU\\Software\\Microsoft\\Edge\\NativeMessagingHosts"),
+            ("Brave", "HKCU\\Software\\BraveSoftware\\Brave\\NativeMessagingHosts"),
+            ("Opera", "HKCU\\Software\\Opera Software\\NativeMessagingHosts"),
         ]
         .iter()
         .map(|(name, key)| BrowserBinding {
@@ -284,7 +317,7 @@ pub fn extension_register_browsers() -> Result<Vec<BrowserBinding>, String> {
             let (k, _) = hkcu
                 .create_subkey(format!("{sub}\\{NATIVE_HOST_NAME}"))
                 .map_err(|e| e.to_string())?;
-            k.set_value("", &manifest.as_str()).map_err(|e| e.to_string())?;
+            k.set_value("", &manifest.display().to_string()).map_err(|e| e.to_string())?;
         }
         Ok(extension_binding_status().browsers)
     }
