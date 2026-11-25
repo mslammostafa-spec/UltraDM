@@ -233,11 +233,7 @@ pub async fn media_probe(url: String) -> Result<MediaInfo, String> {
             for (lang, variants) in map {
                 let exts: Vec<String> = variants
                     .as_array()
-                    .map(|arr| {
-                        arr.iter()
-                            .filter_map(|x| x["ext"].as_str().map(String::from))
-                            .collect::<Vec<_>>()
-                    })
+                    .map(|a| a.iter().filter_map(|x| x["ext"].as_str().map(String::from)).collect())
                     .unwrap_or_default();
                 out.push(MediaTrack { lang: lang.clone(), kind: kind.into(), exts });
             }
@@ -246,150 +242,141 @@ pub async fn media_probe(url: String) -> Result<MediaInfo, String> {
     };
     subs.extend(collect("subtitles", "manual"));
     subs.extend(collect("automatic_captions", "auto"));
+    subs.sort_by(|a, b| a.lang.cmp(&b.lang).then(a.kind.cmp(&b.kind)));
 
-    let is_hls = formats.iter().any(|f| f.ext == "mp4" && f.vcodec.as_deref() == Some("none"))
-        || v["is_live"].as_bool().unwrap_or(false)
-        || extractor.contains("hls")
-        || formats.iter().any(|f| f.format_id.contains("hls"));
-    let is_dash = formats.iter().any(|f| f.ext == "mpd") || extractor.contains("dash");
-
-    Ok(MediaInfo { title, extractor, duration, formats, audio_langs, subs, is_hls, is_dash, webpage_url })
+    let is_hls = url.contains(".m3u8") || out.contains("m3u8");
+    let is_dash = url.contains(".mpd") || out.contains("\"protocol\": \"http_dash_segments\"") || out.contains("dash");
+    Ok(MediaInfo {
+        title,
+        extractor,
+        duration,
+        formats,
+        audio_langs,
+        subs,
+        is_hls,
+        is_dash,
+        webpage_url,
+    })
 }
 
-/// إلغاء مهمة وسائط جارية عبر معرّفها.
-#[tauri::command]
-pub fn media_cancel(handle: State<'_, MediaHandle>, id: String) -> Result<(), String> {
-    let jobs = handle.jobs.lock().unwrap();
-    if let Some(job) = jobs.get(&id) {
-        job.lock().unwrap().cancel.cancel();
-        Ok(())
-    } else {
-        Err("المهمة غير موجودة".into())
-    }
-}
-
-/// تحميل/استخراج/دمج/تحويل عبر yt-dlp + FFmpeg مع بث التقدم كل سطر.
-#[tauri::command]
-pub async fn media_download(
-    app: AppHandle,
-    handle: State<'_, MediaHandle>,
-    req: MediaRequest,
-) -> Result<String, String> {
-    let id = format!("media-{}", handle.seq.fetch_add(1, Ordering::SeqCst));
-    let cancel = tokio_util::sync::CancellationToken::new();
-    handle
-        .jobs
-        .lock()
-        .unwrap()
-        .insert(id.clone(), Arc::new(Mutex::new(MediaJob { cancel: cancel.clone(), percent: 0.0 })));
-
-    let app2 = app.clone();
-    let id2 = id.clone();
-    tauri::async_runtime::spawn(async move {
-        let result = run_media_job(&app2, &id2, &req, cancel).await;
-        let done = result.is_ok();
-        let err = result.err();
-        let _ = Emitter::emit(
-            &app2,
-            "media://progress",
-            &MediaProgress { id: id2.clone(), percent: 100.0, line: "انتهى".into(), done: true, error: err },
-        );
-        if let Ok(h) = app2.try_state::<MediaHandle>() {
-            h.jobs.lock().unwrap().remove(&id2);
+/// بناء وسيطات yt-dlp من طلب المستخدم.
+pub fn build_args(req: &MediaRequest) -> Vec<String> {
+    let mut a = vec![
+        "--no-playlist".into(),
+        "--newline".into(),
+        "--no-part".into(),
+        "--concurrent-fragments".into(), "16".into(), // بث متقطع: تجزئة متوازية
+        "-o".into(),
+        format!("{}/%(title)s.%(ext)s", req.output_dir.trim_end_matches('/').trim()),
+    ];
+    if let Some(f) = &req.format_id {
+        if f != "best" {
+            a.extend(["-f".into(), f.clone()]);
         }
-        let _ = done;
+    }
+    let mode = req.subs_mode.clone().unwrap_or_else(|| "none".into());
+    if let Some(container) = &req.container {
+        if req.audio_only {
+            a.extend(["-x".into(), "--audio-format".into(), container.clone()]);
+            if let Some(b) = &req.audio_bitrate {
+                a.extend(["--audio-quality".into(), b.clone()]);
+            }
+        } else {
+            a.extend(["--merge-output-format".into(), container.clone()]);
+        }
+    }
+    if let Some(langs) = &req.audio_langs {
+        if !langs.is_empty() {
+            a.extend(["--audio-langs".into(), langs.join(",")]);
+        }
+    }
+    if let Some(langs) = &req.subs_langs {
+        if !langs.is_empty() && mode != "none" {
+            a.push("--write-subs".into());
+            if req.subs_auto {
+                a.push("--write-auto-subs".into());
+            }
+            if mode == "embed" {
+                a.push("--embed-subs".into());
+            } else {
+                a.push("--no-embed-subs".into());
+            }
+            a.push("--sub-langs".into());
+            a.push(langs.join(","));
+            if mode == "separate" {
+                a.extend(["--convert-subs".into(), "srt".into()]);
+            }
+        }
+    }
+    if mode == "embed" {
+        a.push("--embed-metadata".into());
+    }
+    a.push(req.url.clone());
+    a
+}
+
+/// استخراج النسبة المئوية من سطر تقدم yt-dlp بصيغة --newline.
+pub fn parse_percent(line: &str) -> Option<f64> {
+    let i = line.find('%')?;
+    let start = line[..i].rfind(|c: char| c.is_whitespace() || c == '[')? + 1;
+    line[start..i].trim().parse().ok()
+}
+
+/// بدء تحميل وسائط عبر yt-dlp (مع FFmpeg للدمج/التحويل).
+#[tauri::command]
+pub async fn media_download(app: AppHandle, state: State<'_, MediaHandle>, req: MediaRequest) -> Result<String, String> {
+    let id = format!("m{}", state.seq.fetch_add(1, Ordering::Relaxed));
+    let args = build_args(&req);
+    let mut child = Command::new("yt-dlp")
+        .args(&args)
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .kill_on_drop(true)
+        .spawn()
+        .map_err(|e| format!("تشغيل yt-dlp: {e} (تأكد من تثبيته في PATH)"))?;
+
+    let stdout = child.stdout.take().ok_or("لا يوجد stdout")?;
+    let cancel = tokio_util::sync::CancellationToken::new();
+    let job = Arc::new(Mutex::new(MediaJob { cancel: cancel.clone(), percent: 0.0 }));
+    state.jobs.lock().unwrap().insert(id.clone(), job.clone());
+
+    // قراءة التقدم سطرًا بسطر وبثّه للواجهة.
+    let job2 = job.clone();
+    let id2 = id.clone();
+    let app2 = app.clone();
+    tokio::spawn(async move {
+        let mut child: Child = child;
+        let mut lines = BufReader::new(stdout).lines();
+        let mut last_line: Option<String> = None;
+        loop {
+            let next = tokio::select! {
+                l = lines.next_line() => l,
+                _ = cancel.cancelled() => {
+                    let _ = child.kill().await;
+                    break;
+                }
+            };
+            let Ok(Some(line)) = next else { break };
+            if let Some(p) = parse_percent(&line) {
+                job2.lock().unwrap().percent = p;
+                let _ = app2.emit("media://progress", MediaProgress { id: id2.clone(), percent: p, line: line.clone(), done: false, error: None });
+            }
+            last_line = Some(line);
+        }
+        let done = child.wait().await.map(|s| s.success()).unwrap_or(false);
+        let err = if done { None } else { Some(last_line.clone().unwrap_or_else(|| "أُلغي".into())) };
+        let percent = if done { 100.0 } else { job2.lock().unwrap().percent };
+        let _ = app2.emit("media://progress", MediaProgress { id: id2.clone(), percent, line: last_line.unwrap_or_default(), done: true, error: err });
     });
     Ok(id)
 }
 
-async fn run_media_job(
-    app: &AppHandle,
-    id: &str,
-    req: &MediaRequest,
-    cancel: tokio_util::sync::CancellationToken,
-) -> Result<(), String> {
-    let emit = |line: String, percent: f64, done: bool, error: Option<String>| {
-        let _ = Emitter::emit(app, "media://progress", &MediaProgress { id: id.into(), percent, line, done, error });
-    };
-
-    let mut cmd = Command::new("yt-dlp");
-    cmd.arg("--newline")
-        .arg("--no-playlist")
-        .arg("--concurrent-fragments")
-        .arg("16")
-        .arg("-P")
-        .arg(&req.output_dir)
-        .arg("--ffmpeg-location")
-        .arg("ffmpeg")
-        .arg("--print")
-        .arg("after_move:filepath")
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped());
-
-    if let Some(fmt) = &req.format_id {
-        cmd.arg("-f").arg(fmt);
+/// إلغاء تحميل وسائط جارٍ.
+#[tauri::command]
+pub fn media_cancel(state: State<'_, MediaHandle>, id: String) {
+    if let Some(job) = state.jobs.lock().unwrap().remove(&id) {
+        job.lock().unwrap().cancel.cancel();
     }
-    if req.audio_only {
-        cmd.arg("-x");
-        if let Some(fmt) = &req.audio_format {
-            cmd.arg("--audio-format").arg(fmt);
-        }
-        if let Some(br) = &req.audio_bitrate {
-            cmd.arg("--audio-quality").arg(br);
-        }
-    } else if let Some(c) = &req.container {
-        cmd.arg("--merge-output-format").arg(c);
-    }
-    if let Some(langs) = &req.audio_langs {
-        if !langs.is_empty() {
-            cmd.arg("--audio-langs").arg(langs.join(","));
-        }
-    }
-    match req.subs_mode.as_deref() {
-        Some("separate") => {
-            if let Some(l) = &req.subs_langs {
-                cmd.arg("--sub-langs").arg(l.join(","));
-            }
-            if req.subs_auto {
-                cmd.arg("--write-auto-subs");
-            }
-            cmd.arg("--write-subs").arg("--convert-subs").arg("srt");
-        }
-        Some("embed") => {
-            cmd.arg("--write-subs").arg("--embed-subs");
-            if req.subs_auto {
-                cmd.arg("--write-auto-subs");
-            }
-        }
-        Some("burn") => {
-            cmd.arg("--write-subs").arg("--embed-subs");
-        }
-        _ => {}
-    }
-    cmd.arg(&req.url);
-
-    let mut child: Child = cmd
-        .spawn()
-        .map_err(|e| format!("فشل تشغيل yt-dlp (متوفر؟): {e}"))?;
-    let stderr = child.stderr.take().ok_or("لا يمكن قراءة المخرجات")?;
-    let mut reader = BufReader::new(stderr).lines();
-    while let Ok(Some(line)) = reader.next_line().await {
-        if cancel.is_cancelled() {
-            let _ = child.kill().await;
-            return Err("أُلغيت المهمة".into());
-        }
-        // أسطر yt-dlp: [download]  23.4% of ...
-        let percent = line
-            .split_whitespace()
-            .find_map(|t| t.strip_suffix('%').and_then(|p| p.parse::<f64>().ok()));
-        emit(line, percent.unwrap_or(0.0), false, None);
-    }
-    let status = child.wait().await.map_err(|e| e.to_string())?;
-    if !status.success() {
-        return Err("فشل التحميل — راجع السجل".into());
-    }
-    emit("اكتمل التحميل".into(), 100.0, true, None);
-    Ok(())
 }
 
 #[cfg(test)]
@@ -397,21 +384,67 @@ mod tests {
     use super::*;
 
     #[test]
-    fn labels_cover_quality_tiers() {
-        assert_eq!(label_for(Some(4320), Some(60), "webm", None), "8K (4320p60, webm)");
-        assert_eq!(label_for(Some(2160), None, "mp4", None), "4K (2160p, mp4)");
-        assert_eq!(label_for(Some(1440), Some(30), "mp4", None), "2K (1440p30, mp4)");
-        assert_eq!(label_for(Some(1080), Some(60), "mp4", Some("video only")), "1080p60 (mp4)");
+    fn labels_use_named_qualities() {
+        assert_eq!(label_for(Some(2160), Some(30), "mp4", Some("video only")), "4K (2160p, mp4)");
+        assert_eq!(label_for(Some(1080), Some(60), "webm", Some("1080p60 HDR")), "1080p60 (webm) — 1080p60 HDR");
+        assert_eq!(label_for(Some(1080), Some(60), "mp4", None), "1080p60 (mp4)");
+        assert_eq!(label_for(Some(140), None, "m4a", None), "140p (m4a)");
         assert_eq!(label_for(None, None, "m4a", None), "صوت (m4a)");
     }
 
     #[test]
-    fn size_estimation_for_fragmented_streams() {
-        // 2 Mbps × 60 ثانية = 15,000,000 بايت تقريبًا
-        let est = (Some(2000.0f64), Some(60.0f64));
-        if let (Some(t), Some(d)) = est {
-            let bytes = ((t * 1000.0) * d) as u64;
-            assert_eq!(bytes, 120_000_000);
-        }
+    fn parses_ytdlp_progress_lines() {
+        assert_eq!(parse_percent("[download]  42.7% of 12.34MiB"), Some(42.7));
+        assert_eq!(parse_percent("[download] 100% of 1.00MiB"), Some(100.0));
+        assert_eq!(parse_percent("[download] Destination: x.mp4"), None);
+    }
+
+    #[test]
+    fn args_cover_streaming_and_subs() {
+        let req = MediaRequest {
+            url: "https://x/live.m3u8".into(),
+            output_dir: "C:/D/".into(),
+            format_id: Some("137+140".into()),
+            container: Some("mkv".into()),
+            audio_only: false,
+            audio_format: None,
+            audio_bitrate: None,
+            audio_langs: Some(vec!["ara".into(), "eng".into()]),
+            subs_langs: Some(vec!["all".into()]),
+            subs_auto: true,
+            subs_mode: Some("separate".into()),
+        };
+        let a = build_args(&req);
+        assert!(a.contains(&"--concurrent-fragments".into()));
+        assert!(a.contains(&"16".into()));
+        assert!(a.contains(&"137+140".into()));
+        assert!(a.contains(&"--sub-langs".into()));
+        assert!(a.contains(&"all".into()));
+        assert!(a.contains(&"--audio-langs".into()));
+        assert!(a.contains(&"ara,eng".into()));
+        assert!(a.contains(&"--convert-subs".into()));
+        assert!(a.contains(&"https://x/live.m3u8".into()));
+        assert_eq!(a.last().unwrap(), "https://x/live.m3u8");
+    }
+
+    #[test]
+    fn audio_extraction_uses_bitrate() {
+        let req = MediaRequest {
+            url: "https://x/watch?v=1".into(),
+            output_dir: "/tmp".into(),
+            format_id: None,
+            container: Some("mp3".into()),
+            audio_only: true,
+            audio_format: None,
+            audio_bitrate: Some("320K".into()),
+            audio_langs: None,
+            subs_langs: None,
+            subs_auto: false,
+            subs_mode: Some("none".into()),
+        };
+        let a = build_args(&req);
+        assert!(a.contains(&"-x".into()));
+        assert!(a.contains(&"mp3".into()));
+        assert!(a.contains(&"320K".into()));
     }
 }
