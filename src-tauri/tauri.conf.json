@@ -31,6 +31,7 @@
   },
   "plugins": {
     "updater": {
+      "active": false,
       "endpoints": [
         "https://github.com/ultradm/UltraDM/releases/latest/downloads/latest.json"
       ],
@@ -39,6 +40,7 @@
   },
   "bundle": {
     "active": true,
+    "createUpdaterArtifacts": false,
     "targets": ["nsis", "msi"],
     "icon": ["icons/icon.ico"],
     "windows": {
