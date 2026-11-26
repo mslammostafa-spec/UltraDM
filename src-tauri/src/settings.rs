@@ -34,7 +34,7 @@ pub fn save_settings(app: tauri::AppHandle, json: String) -> Result<(), String> 
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+    
 
     #[test]
     fn rejects_invalid_json() {

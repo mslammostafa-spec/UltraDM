@@ -22,6 +22,7 @@ pub struct SpeedLimiter {
 }
 
 impl SpeedLimiter {
+    #[must_use]
     pub fn new() -> Self {
         Self { max_bps: AtomicU64::new(0), tokens: AtomicU64::new(0) }
     }
@@ -70,10 +71,16 @@ impl SpeedLimiter {
                 }
             }
             tokio::select! {
-                _ = tokio::time::sleep(std::time::Duration::from_millis(50)) => {}
-                _ = cancel.cancelled() => return 0,
+                () = tokio::time::sleep(std::time::Duration::from_millis(50)) => {}
+                () = cancel.cancelled() => return 0,
             }
         }
+    }
+}
+
+impl Default for SpeedLimiter {
+    fn default() -> Self {
+        Self::new()
     }
 }
 
@@ -117,6 +124,7 @@ impl Default for CacheConfig {
 }
 
 /// نسبة الذاكرة المتاحة في النظام؛ فوق 75% استخدامًا نتراجع للكتابة على القرص.
+#[must_use]
 pub fn system_ram_usable_fraction() -> Option<f64> {
     #[cfg(target_os = "linux")]
     {
@@ -218,7 +226,7 @@ fn meta_path(path: &str) -> PathBuf {
 
 /// تقسيم الملف إلى أجزاء بعدد الخيوط (بحد 32) مع استرجاع تقدم الأجزاء المطابقة.
 fn split_chunks(size: u64, threads: u32, existing: Option<&[ChunkState]>) -> Vec<ChunkState> {
-    let n = threads.clamp(1, MAX_THREADS) as u64;
+    let n = u64::from(threads.clamp(1, MAX_THREADS));
     if size == 0 {
         return vec![ChunkState { start: 0, end: 0, done: 0 }];
     }
@@ -227,15 +235,14 @@ fn split_chunks(size: u64, threads: u32, existing: Option<&[ChunkState]>) -> Vec
     let mut chunks = Vec::with_capacity(n as usize);
     let mut at = 0u64;
     for i in 0..n {
-        let len = per + if i < rem { 1 } else { 0 };
+        let len = per + u64::from(i < rem);
         let start = at;
         let end = at + len - 1;
         at += len;
         let done = existing
             .and_then(|ex| ex.get(i as usize))
             .filter(|c| c.start == start && c.end == end)
-            .map(|c| c.done.min(len))
-            .unwrap_or(0);
+            .map_or(0, |c| c.done.min(len));
         chunks.push(ChunkState { start, end, done });
     }
     chunks
@@ -286,7 +293,7 @@ fn sanitize_file_name(name: &str) -> String {
         "COM8", "COM9", "LPT1", "LPT2", "LPT3", "LPT4", "LPT5", "LPT6", "LPT7", "LPT8", "LPT9",
     ];
     let safe = if reserved.contains(&base.as_str()) {
-        format!("_{}", trimmed)
+        format!("_{trimmed}")
     } else {
         trimmed
     };
@@ -309,8 +316,7 @@ async fn probe(
             .headers()
             .get("accept-ranges")
             .and_then(|v| v.to_str().ok())
-            .map(|v| v.eq_ignore_ascii_case("bytes"))
-            .unwrap_or(false);
+            .is_some_and(|v| v.eq_ignore_ascii_case("bytes"));
         let size = r
             .headers()
             .get("content-length")
@@ -424,14 +430,14 @@ fn persist_item(item: &DownloadItem, chunks: Vec<ChunkState>, etag: Option<Strin
 
 /// تشغيل مهمة تحميل واحدة لكل خيط مع تتبّع لحظي.
 fn spawn_task(app: AppHandle, engine: Arc<Engine>, id: String) {
-    let item_arc = engine.items.lock().unwrap_or_else(|p| p.into_inner()).get(&id).cloned();
+    let item_arc = engine.items.lock().unwrap_or_else(std::sync::PoisonError::into_inner).get(&id).cloned();
     let Some(item_arc) = item_arc else { return };
-    let cancel = item_arc.lock().unwrap_or_else(|p| p.into_inner()).cancel.clone();
+    let cancel = item_arc.lock().unwrap_or_else(std::sync::PoisonError::into_inner).cancel.clone();
 
     tokio::spawn(async move {
         let result = run_download(&app, engine.clone(), &id, &cancel).await;
-        if let Some(item) = engine.items.lock().unwrap_or_else(|p| p.into_inner()).get(&id).cloned() {
-            let mut it = item.lock().unwrap_or_else(|p| p.into_inner());
+        if let Some(item) = engine.items.lock().unwrap_or_else(std::sync::PoisonError::into_inner).get(&id).cloned() {
+            let mut it = item.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
             if cancel.is_cancelled() {
                 // إيقاف مؤقت أو حذف: الحالة أُضيفت مسبقًا
             } else {
@@ -510,7 +516,7 @@ impl Sink {
     async fn write(&mut self, offset: u64, data: &[u8]) -> Result<(), String> {
         match self {
             Sink::Ram(buf) => {
-                let mut b = buf.lock().unwrap_or_else(|p| p.into_inner());
+                let mut b = buf.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
                 let o = offset as usize;
                 if o + data.len() > b.len() {
                     return Err("كتابة خارج حدود مخزن الذاكرة".into());
@@ -538,7 +544,7 @@ impl SharedChunks {
     /// (أكبر عدد بايتات متبقية)، يقسم نصف الذيل المتبقي له إلى جزء جديد
     /// ويضعها في نهاية القائمة، ويعيد فهرسها. ذرّية تحت قفل واحد.
     fn steal_tail(&self, exclude: Option<usize>) -> Option<(usize, u64, u64)> {
-        let mut inner = self.inner.lock().unwrap_or_else(|p| p.into_inner());
+        let mut inner = self.inner.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
         let mut victim: Option<usize> = None;
         let mut best = MIN_STEAL_BYTES;
         for (i, c) in inner.iter().enumerate() {
@@ -573,9 +579,9 @@ async fn run_download(
     id: &str,
     cancel: &CancellationToken,
 ) -> Result<(), String> {
-    let item_arc = engine.items.lock().unwrap_or_else(|p| p.into_inner()).get(id).cloned().ok_or("غير موجود")?;
+    let item_arc = engine.items.lock().unwrap_or_else(std::sync::PoisonError::into_inner).get(id).cloned().ok_or("غير موجود")?;
     let (url, path, threads, saved_meta) = {
-        let it = item_arc.lock().unwrap_or_else(|p| p.into_inner());
+        let it = item_arc.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
         let saved = load_meta(&it.snapshot.file_path);
         (it.snapshot.url.clone(), it.snapshot.file_path.clone(), it.snapshot.threads, saved)
     };
@@ -594,7 +600,7 @@ async fn run_download(
     let chunks = split_chunks(size, threads, Some(&saved_chunks));
     let total_initial: u64 = chunks.iter().map(|c| c.done).sum();
     {
-        let mut it = item_arc.lock().unwrap_or_else(|p| p.into_inner());
+        let mut it = item_arc.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
         it.snapshot.size = size;
         it.snapshot.threads = threads;
         it.snapshot.downloaded = total_initial;
@@ -606,7 +612,7 @@ async fn run_download(
     // تُكتب على القرص كتابة تسلسلية واحدة عند الاكتمال (دورة كتابة واحدة).
     // إذا تجاوز استهلاك RAM النظام 75% نتراجع تلقائيًا للكتابة على القرص.
     let (ram_first, ram_limit) = {
-        let c = engine.cache.lock().unwrap_or_else(|p| p.into_inner());
+        let c = engine.cache.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
         (c.ram_first, c.ram_full_limit_bytes)
     };
     let use_ram = ram_first
@@ -620,6 +626,7 @@ async fn run_download(
         // الملف الجزئي نفسه هو مخزن الحالة: الاستئناف يكتب فوقه من آخر إزاحة.
         let file = tokio::fs::OpenOptions::new()
             .create(true)
+            .truncate(true)
             .write(true)
             .open(&path)
             .await
@@ -650,11 +657,11 @@ async fn run_download(
             if ck_cancel.is_cancelled() {
                 break;
             }
-            let it = ck_item.lock().unwrap_or_else(|p| p.into_inner());
+            let it = ck_item.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
             if it.cancel.is_cancelled() {
                 break;
             }
-            let chunks = ck_shared.inner.lock().unwrap_or_else(|p| p.into_inner()).clone();
+            let chunks = ck_shared.inner.lock().unwrap_or_else(std::sync::PoisonError::into_inner).clone();
             let st = PersistedState {
                 url: it.snapshot.url.clone(),
                 size: it.snapshot.size,
@@ -670,7 +677,7 @@ async fn run_download(
 
     let mut handles = Vec::new();
     for idx in 0.. {
-        if idx >= shared.inner.lock().unwrap_or_else(|p| p.into_inner()).len() {
+        if idx >= shared.inner.lock().unwrap_or_else(std::sync::PoisonError::into_inner).len() {
             break;
         }
         handles.push(tokio::spawn(download_chunk(
@@ -689,8 +696,8 @@ async fn run_download(
     let result: Result<(), String> = futures_util::future::join_all(handles)
         .await
         .into_iter()
-        .filter_map(|r| r.ok())
-        .find(|r| r.is_err())
+        .filter_map(std::result::Result::ok)
+        .find(std::result::Result::is_err)
         .unwrap_or(Ok(()));
     ck_handle.abort();
 
@@ -698,22 +705,22 @@ async fn run_download(
     // الذاكرة فورًا. عند الاكتمال يكون الملف جاهزًا للتشغيل بلا أي دمج إضافي.
     if let Some(buf_arc) = &shared.ram {
         // كتابة متزامنة حتى لا يُحتفظ بقفل الذاكرة عبر نقطة انتظار.
-        let buf = buf_arc.lock().unwrap_or_else(|p| p.into_inner());
+        let buf = buf_arc.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
         std::fs::write(&path, buf.as_slice()).map_err(|e| e.to_string())?;
         drop(buf);
     }
 
     // حفظ حالة الأجزاء على القرص (استئناف حتى بعد إغلاق البرنامج).
     {
-        let it = item_arc.lock().unwrap_or_else(|p| p.into_inner());
-        let chunks = shared.inner.lock().unwrap_or_else(|p| p.into_inner()).clone();
+        let it = item_arc.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        let chunks = shared.inner.lock().unwrap_or_else(std::sync::PoisonError::into_inner).clone();
         persist_item(&it, chunks, etag, last_modified, accepts_ranges);
     }
 
     // تحقّق نهائي من الحجم (سلامة الملف): إذا اكتمل بنجاح والطول معروف،
     // يجب أن يطابق الملف حجم الخادم تمامًا وإلا يُعد فشلاً قابلًا للاستئناف.
     if result.is_ok() && size > 0 {
-        let on_disk = std::fs::metadata(&path).map(|m| m.len()).unwrap_or(0);
+        let on_disk = std::fs::metadata(&path).map_or(0, |m| m.len());
         if on_disk != size {
             return Err(format!(
                 "فشل التحقق من الحجم: المتوقع {size} بايت والمكتوب {on_disk} بايت — أعد المحاولة للاستئناف"
@@ -721,7 +728,7 @@ async fn run_download(
         }
     }
 
-    emit_progress(app, &engine, &item_arc, &shared).await;
+    emit_progress(app, &engine, &item_arc, &shared);
     result
 }
 
@@ -744,7 +751,7 @@ async fn download_chunk(
             return Ok(());
         }
         let (start, end, done) = {
-            let chunks = shared.inner.lock().unwrap_or_else(|p| p.into_inner());
+            let chunks = shared.inner.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
             let c = &chunks[my_idx];
             (c.start, c.end, c.done)
         };
@@ -768,7 +775,7 @@ async fn download_chunk(
             r = tokio::time::timeout(std::time::Duration::from_secs(20), req.send()) => {
                 r.map_err(|_| "انتهت مهلة بدء الاستجابة".to_string())?.map_err(|e| e.to_string())?
             }
-            _ = cancel.cancelled() => return Ok(()),
+            () = cancel.cancelled() => return Ok(()),
         };
         if !resp.status().is_success() {
             return Err(format!("HTTP {}", resp.status()));
@@ -793,7 +800,7 @@ async fn download_chunk(
             c = tokio::time::timeout(std::time::Duration::from_secs(30), stream.next()) => {
                 c.unwrap_or(None)
             }
-            _ = cancel.cancelled() => None,
+            () = cancel.cancelled() => None,
         } {
             let Ok(bytes) = item_ else {
                 net_err = Some("انقطع الاتصال".into());
@@ -808,17 +815,17 @@ async fn download_chunk(
                 }
                 let offset = start + done + written as u64;
                 // إذا سُرق ذيلي أثناء الكتابة (خيط أسرع ساعدني) توقف فوراً.
-                if offset > shared.inner.lock().unwrap_or_else(|p| p.into_inner())[my_idx].end {
+                if offset > shared.inner.lock().unwrap_or_else(std::sync::PoisonError::into_inner)[my_idx].end {
                     break;
                 }
                 if let Err(e) = sink.write(offset, &bytes[written..written + grant]).await {
-                    net_err = Some(e.to_string());
+                    net_err = Some(e.clone());
                     break;
                 }
                 written += grant;
                 shared.received.fetch_add(grant as u64, Ordering::Relaxed);
-                shared.inner.lock().unwrap_or_else(|p| p.into_inner())[my_idx].done += grant as u64;
-                maybe_emit(&engine, &item, &shared, &clock).await;
+                shared.inner.lock().unwrap_or_else(std::sync::PoisonError::into_inner)[my_idx].done += grant as u64;
+                maybe_emit(&engine, &item, &shared, &clock);
             }
             if net_err.is_some() {
                 break;
@@ -833,7 +840,7 @@ async fn download_chunk(
             return Err(e);
         }
 
-        let have = shared.inner.lock().unwrap_or_else(|p| p.into_inner())[my_idx].done;
+        let have = shared.inner.lock().unwrap_or_else(std::sync::PoisonError::into_inner)[my_idx].done;
         if have >= want {
             match shared.steal_tail(Some(my_idx)) {
                 Some((ni, _, _)) => {
@@ -845,16 +852,16 @@ async fn download_chunk(
         }
         // انقطع البث قبل الاكتمال: أعد المحاولة من آخر بايت (تجديد الروابط تلقائيًا).
         tokio::select! {
-            _ = tokio::time::sleep(std::time::Duration::from_millis(500)) => {}
-            _ = cancel.cancelled() => return Ok(()),
+            () = tokio::time::sleep(std::time::Duration::from_millis(500)) => {}
+            () = cancel.cancelled() => return Ok(()),
         }
     }
 }
 
 /// نبضة كل 250 ملّي ثانية: تحديث السرعة/الوقت المتبقي وإرسال الحدث للواجهة.
-async fn maybe_emit(engine: &Arc<Engine>, item: &Arc<Mutex<DownloadItem>>, shared: &Arc<SharedChunks>, clock: &Arc<Mutex<(u64, std::time::Instant)>>) {
+fn maybe_emit(engine: &Arc<Engine>, item: &Arc<Mutex<DownloadItem>>, shared: &Arc<SharedChunks>, clock: &Arc<Mutex<(u64, std::time::Instant)>>) {
     let (delta, dt, received) = {
-        let mut last = clock.lock().unwrap_or_else(|p| p.into_inner());
+        let mut last = clock.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
         let now = std::time::Instant::now();
         let elapsed = last.1.elapsed();
         if elapsed < std::time::Duration::from_millis(250) {
@@ -867,19 +874,19 @@ async fn maybe_emit(engine: &Arc<Engine>, item: &Arc<Mutex<DownloadItem>>, share
         (delta, dt, received)
     };
     let speed = delta as f64 / dt;
-    update_snapshot(engine, item, shared, received, speed).await;
+    update_snapshot(engine, item, shared, received, speed);
 }
 
-async fn emit_progress(app: &AppHandle, engine: &Arc<Engine>, item_arc: &Arc<Mutex<DownloadItem>>, shared: &Arc<SharedChunks>) {
+fn emit_progress(app: &AppHandle, engine: &Arc<Engine>, item_arc: &Arc<Mutex<DownloadItem>>, shared: &Arc<SharedChunks>) {
     let _ = (app, engine);
     let received = shared.received.load(Ordering::Relaxed);
-    update_snapshot(engine, item_arc, shared, received, 0.0).await;
+    update_snapshot(engine, item_arc, shared, received, 0.0);
 }
 
-async fn update_snapshot(engine: &Arc<Engine>, item: &Arc<Mutex<DownloadItem>>, shared: &Arc<SharedChunks>, received: u64, speed: f64) {
-    let chunks = shared.inner.lock().unwrap_or_else(|p| p.into_inner()).clone();
+fn update_snapshot(engine: &Arc<Engine>, item: &Arc<Mutex<DownloadItem>>, shared: &Arc<SharedChunks>, received: u64, speed: f64) {
+    let chunks = shared.inner.lock().unwrap_or_else(std::sync::PoisonError::into_inner).clone();
     let snap = {
-        let mut it = item.lock().unwrap_or_else(|p| p.into_inner());
+        let mut it = item.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
         let s = &mut it.snapshot;
         s.downloaded = received;
         s.progress = if s.size > 0 { received as f64 / s.size as f64 * 100.0 } else { 0.0 };
@@ -925,12 +932,19 @@ pub fn engine_set_cache_config(
     ram_first: bool,
     ram_full_limit_bytes: u64,
 ) {
-    let mut c = state.0.cache.lock().unwrap_or_else(|p| p.into_inner());
+    let mut c = state.0.cache.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
     c.ram_first = ram_first;
     c.ram_full_limit_bytes = ram_full_limit_bytes.max(512 * 1024 * 1024);
 }
 
+/// إضافة تحميل جديد للطابور.
+///
+/// # Errors
+/// يعيد رسالة خطأ عربية إذا كان الرابط داخليًا (blob/data/mediastream)
+/// أو ملف webmanifest، أو ليس http/https/magnet/‏.torrent/‏.nzb،
+/// أو فشل فحص الرابط (probe) أو إنشاء مجلد الحفظ.
 #[tauri::command]
+#[allow(clippy::needless_pass_by_value)] // متطلب من tauri::command: State و String يُستهلكان عبر الـ macro
 pub async fn engine_add(
     app: AppHandle,
     state: State<'_, EngineHandle>,
@@ -951,16 +965,17 @@ pub async fn engine_add(
     }
     if !url.starts_with("http://") && !url.starts_with("https://") && !lower.starts_with("magnet:")
         && !lower.ends_with(".torrent") && !lower.contains(".torrent?")
-        && !lower.ends_with(".nzb") && !lower.contains(".nzb?")
+        && !std::path::Path::new(&lower)
+            .extension()
+            .is_some_and(|ext| ext.eq_ignore_ascii_case("nzb"))
+        && !lower.contains(".nzb?")
     {
         return Err("الرابط يجب أن يكون http/https أو magnet: أو رابط .torrent/.nzb".into());
     }
     let threads = threads.clamp(1, MAX_THREADS);
     let (size, _etag, _lm, _ar, cd_name) = probe(&url, &state.0.client).await?;
     let name = cd_name
-        .filter(|n| !n.trim().is_empty())
-        .map(|n| sanitize_file_name(n.trim()))
-        .unwrap_or_else(|| file_name_from_url(&url));
+        .filter(|n| !n.trim().is_empty()).map_or_else(|| file_name_from_url(&url), |n| sanitize_file_name(n.trim()));
     let path = if save_path.is_empty() {
         name.clone()
     } else if save_path.ends_with(['/', '\\']) {
@@ -1001,36 +1016,46 @@ pub async fn engine_add(
         snapshot: snapshot.clone(),
         cancel: CancellationToken::new(),
     }));
-    state.0.items.lock().unwrap_or_else(|p| p.into_inner()).insert(id.clone(), item);
+    state.0.items.lock().unwrap_or_else(std::sync::PoisonError::into_inner).insert(id.clone(), item);
     spawn_task(app, state.0.clone(), id);
     Ok(snapshot)
 }
 
+/// إيقاف تحميل مؤقتاً.
+///
+/// # Errors
+/// يعيد "غير موجود" إذا لم يكن هناك تحميل بهذا المعرّف.
 #[tauri::command]
+#[allow(clippy::needless_pass_by_value)] // متطلب من tauri::command: State و String يُستهلكان عبر الـ macro
 pub async fn engine_pause(app: AppHandle, state: State<'_, EngineHandle>, id: String) -> Result<(), String> {
-    let item = state.0.items.lock().unwrap_or_else(|p| p.into_inner()).get(&id).cloned().ok_or("غير موجود")?;
+    let item = state.0.items.lock().unwrap_or_else(std::sync::PoisonError::into_inner).get(&id).cloned().ok_or("غير موجود")?;
     {
-        let mut it = item.lock().unwrap_or_else(|p| p.into_inner());
+        let mut it = item.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
         it.cancel.cancel();
         it.snapshot.status = "paused".into();
         it.snapshot.speed_bps = 0.0;
         it.snapshot.eta_seconds = None;
     }
-    let snap = item.lock().unwrap_or_else(|p| p.into_inner()).snapshot.clone();
+    let snap = item.lock().unwrap_or_else(std::sync::PoisonError::into_inner).snapshot.clone();
     let _ = app.emit("download://progress", &snap);
     Ok(())
 }
 
+/// استئناف تحميل متوقف.
+///
+/// # Errors
+/// يعيد "غير موجود" إذا لم يكن هناك تحميل بهذا المعرّف.
 #[tauri::command]
+#[allow(clippy::needless_pass_by_value)] // متطلب من tauri::command: State و String يُستهلكان عبر الـ macro
 pub async fn engine_resume(app: AppHandle, state: State<'_, EngineHandle>, id: String) -> Result<(), String> {
-    let exists = state.0.items.lock().unwrap_or_else(|p| p.into_inner()).contains_key(&id);
+    let exists = state.0.items.lock().unwrap_or_else(std::sync::PoisonError::into_inner).contains_key(&id);
     if !exists {
         return Err("غير موجود".into());
     }
     {
-        let items = state.0.items.lock().unwrap_or_else(|p| p.into_inner());
+        let items = state.0.items.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
         let item = items.get(&id).unwrap();
-        let mut it = item.lock().unwrap_or_else(|p| p.into_inner());
+        let mut it = item.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
         it.cancel = CancellationToken::new();
         it.snapshot.status = "queued".into();
         it.snapshot.error = None;
@@ -1039,12 +1064,17 @@ pub async fn engine_resume(app: AppHandle, state: State<'_, EngineHandle>, id: S
     Ok(())
 }
 
+/// إلغاء تحميل وحذف ملفاته الجزئية.
+///
+/// # Errors
+/// يعيد "غير موجود" إذا لم يكن هناك تحميل بهذا المعرّف.
 #[tauri::command]
+#[allow(clippy::needless_pass_by_value)] // متطلب من tauri::command: State و String يُستهلكان عبر الـ macro
 pub async fn engine_cancel(state: State<'_, EngineHandle>, id: String) -> Result<(), String> {
-    let removed = state.0.items.lock().unwrap_or_else(|p| p.into_inner()).remove(&id);
+    let removed = state.0.items.lock().unwrap_or_else(std::sync::PoisonError::into_inner).remove(&id);
     if let Some(item) = removed {
         let path = {
-            let mut it = item.lock().unwrap_or_else(|p| p.into_inner());
+            let it = item.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
             it.cancel.cancel();
             it.snapshot.file_path.clone()
         };
@@ -1052,7 +1082,6 @@ pub async fn engine_cancel(state: State<'_, EngineHandle>, id: String) -> Result
         // قصيرة تُسقط فيها الأجزاء النشطة مقابض ملفاتها (الإلغاء يوقف كل خيوط
         // التنزيل). أي فشل في الحذف (ملف مقفول على Windows) يُتجاهل بصمت —
         // لا يُلغي الأمر نفسه ولا يُنهي التطبيق أبداً.
-        // تنظيف آمن بعد الإلغاء: نحذف الملف الجزئي وملف الـ checkpoint بعد مهلة
         tokio::spawn(async move {
             tokio::time::sleep(std::time::Duration::from_millis(700)).await;
             let _ = std::fs::remove_file(std::path::Path::new(&path).with_extension("tmp"));
@@ -1064,6 +1093,7 @@ pub async fn engine_cancel(state: State<'_, EngineHandle>, id: String) -> Result
 }
 
 #[tauri::command]
+#[must_use]
 pub fn engine_list(state: State<'_, EngineHandle>) -> Vec<DownloadSnapshot> {
     state
         .0
@@ -1071,21 +1101,26 @@ pub fn engine_list(state: State<'_, EngineHandle>) -> Vec<DownloadSnapshot> {
         .lock()
         .unwrap()
         .values()
-        .map(|i| i.lock().unwrap_or_else(|p| p.into_inner()).snapshot.clone())
+        .map(|i| i.lock().unwrap_or_else(std::sync::PoisonError::into_inner).snapshot.clone())
         .collect()
 }
 
+/// تغيير عدد خيوط تحميل جارٍ (يعيد تقسيم الأجزاء عند الاستئناف).
+///
+/// # Errors
+/// يعيد "غير موجود" إذا لم يكن هناك تحميل بهذا المعرّف.
 #[tauri::command]
+#[allow(clippy::needless_pass_by_value)] // متطلب من tauri::command: State و String يُستهلكان عبر الـ macro
 pub fn engine_set_threads(state: State<'_, EngineHandle>, id: String, threads: u32) -> Result<(), String> {
-    let item = state.0.items.lock().unwrap_or_else(|p| p.into_inner()).get(&id).cloned().ok_or("غير موجود")?;
-    item.lock().unwrap_or_else(|p| p.into_inner()).snapshot.threads = threads.clamp(1, MAX_THREADS);
+    let item = state.0.items.lock().unwrap_or_else(std::sync::PoisonError::into_inner).get(&id).cloned().ok_or("غير موجود")?;
+    item.lock().unwrap_or_else(std::sync::PoisonError::into_inner).snapshot.threads = threads.clamp(1, MAX_THREADS);
     Ok(())
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::io::{Seek, Write as IoWrite};
+    use std::io::Seek;
 
     #[test]
     fn splits_into_thread_count_chunks() {
@@ -1136,7 +1171,7 @@ mod tests {
         let stolen = shared.steal_tail(None).expect("يجب أن يسرق من الأكبر بقاءً");
         let (idx, s, e) = stolen;
         assert!(idx >= 2);
-        let inner = shared.inner.lock().unwrap_or_else(|p| p.into_inner());
+        let inner = shared.inner.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
         // الضحية (الأكبر بقاءً: 4MB) تقلّص نهايتها لصالح الجزء الجديد.
         assert_eq!(inner[1].end + 1, s);
         assert_eq!(e, 6 * MIN_STEAL_BYTES - 1);
@@ -1156,7 +1191,7 @@ mod tests {
         };
         // المتبقي 1001، النصف 500 < MIN_STEAL_BYTES ⇒ لا سرقة مجدية
         // (لأن steal_len = rem/2 يجب أن يتجاوز الحد الأدنى)
-        let mut inner = shared.inner.lock().unwrap_or_else(|p| p.into_inner());
+        let mut inner = shared.inner.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
         inner[0] = ChunkState { start: 0, end: 4 * MIN_STEAL_BYTES - 1, done: 0 };
         drop(inner);
         let stolen = shared.steal_tail(None);
@@ -1171,7 +1206,7 @@ mod tests {
         std::fs::create_dir_all(&dir).unwrap();
         let path = dir.join("asm.bin");
         let size: u64 = 4096;
-        let file = std::fs::OpenOptions::new().create(true).write(true).open(&path).unwrap();
+        let file = std::fs::OpenOptions::new().create(true).truncate(true).write(true).open(&path).unwrap();
         file.set_len(size).unwrap();
         drop(file);
         // ثمانية "خيوط" تكتب كلٌّ 512 بايت في مواقع عشوائية الترتيب الزمني.
@@ -1186,7 +1221,7 @@ mod tests {
         let out = std::fs::read(&path).unwrap();
         assert_eq!(out.len() as u64, size);
         for (i, b) in out.iter().enumerate() {
-            assert_eq!(*b, (i / 512) as u8, "بايت خارج مكانه عند {}", i);
+            assert_eq!(*b, (i / 512) as u8, "بايت خارج مكانه عند {i}");
         }
         let _ = std::fs::remove_file(&path);
         let _ = std::fs::remove_dir(&dir);
@@ -1209,7 +1244,7 @@ mod tests {
         let cancel = CancellationToken::new();
         let start = std::time::Instant::now();
         let granted = lim.acquire(350, &cancel).await;
-        assert!(granted <= 350 && granted >= 100);
+        assert!((100..=350).contains(&granted));
         assert!(start.elapsed() >= std::time::Duration::from_millis(150));
         handle.abort();
     }

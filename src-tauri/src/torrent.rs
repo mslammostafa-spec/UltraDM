@@ -134,7 +134,6 @@ pub async fn torrent_add(
     let id = engine.next_id.fetch_add(1, Ordering::Relaxed);
     let name: String = handle
         .name()
-        .map(|s| s.to_string())
         .unwrap_or_else(|| format!("مغناطيس {id}"));
     let item = TorrentItem { handle, name };
     let snap = TorrentEngine::snapshot(&item, id);
@@ -206,9 +205,8 @@ pub async fn torrent_verify_sha256(
     let output = handle
         .output_folder()
         .to_path_buf();
-    let metadata = match handle.metadata.load().clone() {
-        Some(m) => m,
-        None => return Err("لم تُجلب بيانات التورنت بعد".into()),
+    let Some(metadata) = handle.metadata.load().clone() else {
+        return Err("لم تُجلب بيانات التورنت بعد".into());
     };
     // ابحث عن أول ملف غير فارغ وابنِ مساره.
     let file = metadata
@@ -257,7 +255,7 @@ pub fn spawn_progress_task(app: AppHandle, engine: Arc<TorrentEngine>) {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+    
 
     #[test]
     fn progress_math_is_zero_safe() {

@@ -192,10 +192,7 @@ async fn handle_conn(app: AppHandle, mut stream: tokio::net::TcpStream) -> Resul
 
     // ثم قراءة الرسائل (إطارات نصية مقنّعة من العميل)
     loop {
-        let msg = match read_ws_frame(&mut stream).await {
-            Ok(m) => m,
-            Err(_) => break,
-        };
+        let Ok(msg) = read_ws_frame(&mut stream).await else { break };
         // probe يعيد قائمة الجودات، وdownload يعيد معرّف التحميل،
         // وغيرهما يحصل على التأكيد الافتراضي.
         match handle_message(&app, &msg).await {
@@ -253,7 +250,7 @@ async fn handle_message(app: &AppHandle, raw: &str) -> Option<String> {
         "download" => {
             let url = v.get("url")?.as_str()?.to_string();
             let format_id = v.get("format_id").and_then(|x| x.as_str()).map(String::from);
-            let audio_only = v.get("audio_only").and_then(|x| x.as_bool()).unwrap_or(false);
+            let audio_only = v.get("audio_only").and_then(serde_json::Value::as_bool).unwrap_or(false);
             let audio_format = v.get("audio_format").and_then(|x| x.as_str()).map(String::from);
             let container = v.get("container").and_then(|x| x.as_str()).map(String::from);
             let req = super::media::MediaRequest {
@@ -281,9 +278,7 @@ async fn handle_message(app: &AppHandle, raw: &str) -> Option<String> {
 /// مجلد التنزيلات الافتراضي لبدء التحميل من الإضافة مباشرة.
 fn download_dir(app: &AppHandle) -> String {
     app.path()
-        .download_dir()
-        .map(|p| p.to_string_lossy().into_owned())
-        .unwrap_or_else(|_| std::env::temp_dir().to_string_lossy().into_owned())
+        .download_dir().map_or_else(|_| std::env::temp_dir().to_string_lossy().into_owned(), |p| p.to_string_lossy().into_owned())
 }
 
 /// تبسيط قائمة الجودات للإضافة: أفضل جودة، جودات فيديو بلا تكرار للارتفاع، وصوت فقط (MP3/M4A).
@@ -294,14 +289,14 @@ fn probe_reply(info: &super::media::MediaInfo) -> serde_json::Value {
         "height": serde_json::Value::Null, "size": serde_json::Value::Null,
         "audioOnly": false, "audioFormat": serde_json::Value::Null,
     })];
-    let mut seen: std::collections::HashSet<u32> = Default::default();
+    let mut seen: std::collections::HashSet<u32> = std::collections::HashSet::new();
     // من الأعلى للأدنى، ونفضّل mp4 لكل ارتفاع.
     let mut video: Vec<&super::media::MediaFormat> = info
         .formats
         .iter()
         .filter(|f| f.height.is_some())
         .collect();
-    video.sort_by(|a, b| b.height.unwrap().cmp(&a.height.unwrap()));
+    video.sort_by_key(|f| std::cmp::Reverse(f.height.unwrap_or(0)));
     for f in video {
         let h = f.height.unwrap();
         if !seen.insert(h) {
@@ -400,6 +395,7 @@ use sha1::{Digest as _, Sha1};
 
 /// حالة الربط لكل متصفح — يعرضها زر الإعدادات.
 #[tauri::command]
+#[must_use]
 pub fn extension_binding_status() -> ExtensionBindingStatus {
     #[cfg(target_os = "windows")]
     {

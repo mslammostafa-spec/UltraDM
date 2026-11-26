@@ -1,6 +1,6 @@
-//! تكامل yt-dlp و FFmpeg: تحليل روابط الفيديو/الصوت/البث المباشر
+//! تكامل yt-dlp و `FFmpeg`: تحليل روابط الفيديو/الصوت/البث المباشر
 //! (أكثر من 1700 موقع + M3U8/MPD) واستخراج الجودات والمسارات الصوتية
-//! والترجمات، ثم التحميل والدمج والتحويل عبر FFmpeg.
+//! والترجمات، ثم التحميل والدمج والتحويل عبر `FFmpeg`.
 
 use std::collections::HashMap;
 use std::process::Stdio;
@@ -88,9 +88,9 @@ pub struct MediaRequest {
     pub subs_mode: Option<String>, // none | separate | embed | burn
 }
 
-struct MediaJob {
-    cancel: tokio_util::sync::CancellationToken,
-    percent: f64,
+pub struct MediaJob {
+    pub cancel: tokio_util::sync::CancellationToken,
+    pub percent: f64,
 }
 
 pub struct MediaHandle {
@@ -153,8 +153,9 @@ fn tool_cmd_sync(tool: &str) -> std::process::Command {
     }
 }
 
-/// فحص توفّر yt-dlp و FFmpeg وإصداريهما.
+/// فحص توفّر yt-dlp و `FFmpeg` وإصداريهما.
 #[tauri::command]
+#[must_use]
 pub fn media_check() -> ToolStatus {
     let ytdlp = run_capture(tool_cmd_sync("yt-dlp").arg("--version").stdout(Stdio::piped()).stderr(Stdio::null()));
     let ffmpeg = run_capture(tool_cmd_sync("ffmpeg").arg("-version").stdout(Stdio::piped()).stderr(Stdio::null()));
@@ -234,7 +235,7 @@ pub async fn media_probe(url: String) -> Result<MediaInfo, String> {
             let lang = f["language"].as_str().map(String::from);
             let note = f["format_note"].as_str().unwrap_or("");
             // تقدير الحجم لمقاطع البث (HLS) من معدل البت والمدة.
-            let size = size.or_else(|| match (tbr, duration) {
+            let size = size.or(match (tbr, duration) {
                 (Some(t), Some(d)) if t > 0.0 => Some(((t * 1000.0) * d) as u64),
                 _ => None,
             });
@@ -301,6 +302,7 @@ pub async fn media_probe(url: String) -> Result<MediaInfo, String> {
 }
 
 /// بناء وسيطات yt-dlp من طلب المستخدم.
+#[must_use]
 pub fn build_args(req: &MediaRequest) -> Vec<String> {
     let mut a = vec![
         "--no-playlist".into(),
@@ -357,13 +359,14 @@ pub fn build_args(req: &MediaRequest) -> Vec<String> {
 }
 
 /// استخراج النسبة المئوية من سطر تقدم yt-dlp بصيغة --newline.
+#[must_use]
 pub fn parse_percent(line: &str) -> Option<f64> {
     let i = line.find('%')?;
     let start = line[..i].rfind(|c: char| c.is_whitespace() || c == '[')? + 1;
     line[start..i].trim().parse().ok()
 }
 
-/// بدء تحميل وسائط عبر yt-dlp (مع FFmpeg للدمج/التحويل).
+/// بدء تحميل وسائط عبر yt-dlp (مع `FFmpeg` للدمج/التحويل).
 #[tauri::command]
 pub async fn media_download(app: AppHandle, state: State<'_, MediaHandle>, req: MediaRequest) -> Result<String, String> {
     let id = format!("m{}", state.seq.fetch_add(1, Ordering::Relaxed));
@@ -379,7 +382,7 @@ pub async fn media_download(app: AppHandle, state: State<'_, MediaHandle>, req: 
     let stdout = child.stdout.take().ok_or("لا يوجد stdout")?;
     let cancel = tokio_util::sync::CancellationToken::new();
     let job = Arc::new(Mutex::new(MediaJob { cancel: cancel.clone(), percent: 0.0 }));
-    state.jobs.lock().unwrap().insert(id.clone(), job.clone());
+    state.jobs.lock().unwrap_or_else(std::sync::PoisonError::into_inner).insert(id.clone(), job.clone());
 
     // قراءة التقدم سطرًا بسطر وبثّه للواجهة.
     let job2 = job.clone();
@@ -392,21 +395,21 @@ pub async fn media_download(app: AppHandle, state: State<'_, MediaHandle>, req: 
         loop {
             let next = tokio::select! {
                 l = lines.next_line() => l,
-                _ = cancel.cancelled() => {
+                () = cancel.cancelled() => {
                     let _ = child.kill().await;
                     break;
                 }
             };
             let Ok(Some(line)) = next else { break };
             if let Some(p) = parse_percent(&line) {
-                job2.lock().unwrap().percent = p;
+                job2.lock().unwrap_or_else(std::sync::PoisonError::into_inner).percent = p;
                 let _ = app2.emit("media://progress", MediaProgress { id: id2.clone(), percent: p, line: line.clone(), done: false, error: None });
             }
             last_line = Some(line);
         }
-        let done = child.wait().await.map(|s| s.success()).unwrap_or(false);
+        let done = child.wait().await.is_ok_and(|s| s.success());
         let err = if done { None } else { Some(last_line.clone().unwrap_or_else(|| "أُلغي".into())) };
-        let percent = if done { 100.0 } else { job2.lock().unwrap().percent };
+        let percent = if done { 100.0 } else { job2.lock().unwrap_or_else(std::sync::PoisonError::into_inner).percent };
         let _ = app2.emit("media://progress", MediaProgress { id: id2.clone(), percent, line: last_line.unwrap_or_default(), done: true, error: err });
     });
     Ok(id)
@@ -415,8 +418,8 @@ pub async fn media_download(app: AppHandle, state: State<'_, MediaHandle>, req: 
 /// إلغاء تحميل وسائط جارٍ.
 #[tauri::command]
 pub fn media_cancel(state: State<'_, MediaHandle>, id: String) {
-    if let Some(job) = state.jobs.lock().unwrap().remove(&id) {
-        job.lock().unwrap().cancel.cancel();
+    if let Some(job) = state.jobs.lock().unwrap_or_else(std::sync::PoisonError::into_inner).remove(&id) {
+        job.lock().unwrap_or_else(std::sync::PoisonError::into_inner).cancel.cancel();
     }
 }
 
@@ -448,8 +451,8 @@ async fn download_to(url: &str, dest: &std::path::Path, app: &AppHandle, step: &
     Ok(())
 }
 
-/// تثبيت yt-dlp و FFmpeg في %LOCALAPPDATA%\UltraDM\bin (ويندوز) أو
-/// ~/.local/share/UltraDM/bin. yt-dlp ملف تنفيذي واحد، وFFmpeg حزمة
+/// تثبيت yt-dlp و `FFmpeg` في %LOCALAPPDATA%\UltraDM\bin (ويندوز) أو
+/// ~/.local/share/UltraDM/bin. yt-dlp ملف تنفيذي واحد، `وFFmpeg` حزمة
 /// zip تُفكّ بـ PowerShell ثم يُؤخذ ffmpeg.exe و ffprobe.exe فقط.
 #[tauri::command]
 pub async fn media_install_tools(app: AppHandle) -> Result<(), String> {
@@ -500,7 +503,12 @@ pub async fn media_install_tools(app: AppHandle) -> Result<(), String> {
         .await
         .map_err(|e| format!("بحث FFmpeg: {e}"))?;
     let found = String::from_utf8_lossy(&find.stdout);
-    for (i, src) in found.lines().filter(|l| l.ends_with(".exe")).take(2).enumerate() {
+    for (i, src) in found
+        .lines()
+        .filter(|l| l.to_lowercase().ends_with(".exe"))
+        .take(2)
+        .enumerate()
+    {
         let name = if i == 0 { "ffmpeg.exe" } else { "ffprobe.exe" };
         let _ = tokio::fs::copy(src, bin.join(name)).await;
     }

@@ -1,3 +1,18 @@
+// هذا المشروع وحداته منطق حسابي/شبكي: تحويلات u64→f64 للسرعة والتقدم تفقد دقة
+// فوق 2⁵³ بايت فقط (بلا معنى عملي)، وتحويلات u64→usize محكومة بأرقام أجزاء
+// (بحد 32 خيطًا) وحجم كاش الذاكرة. توقيعات tauri::command تفرض تمرير القيمة،
+// وهذه الصلاحيات تُبقي تقرير clippy Pedantic قابلًا للقراءة دون كلفة فعلية.
+#![allow(
+    clippy::cast_precision_loss,
+    clippy::cast_possible_truncation,
+    clippy::cast_sign_loss,
+    clippy::missing_errors_doc,
+    clippy::missing_panics_doc,
+    clippy::needless_pass_by_value, // توقيعات tauri::command تفرض القيمة (State/String)
+    clippy::items_after_statements, // use محلي قبل حلقة تنزيل مقصود
+    clippy::too_many_lines
+)]
+
 use serde::Serialize;
 use tauri::menu::{Menu, MenuItem};
 use tauri::{Emitter, Manager};
@@ -33,15 +48,16 @@ fn run_power_command(program: &str, args: &[&str]) -> Result<(), String> {
 }
 
 #[cfg(not(target_os = "windows"))]
+#[allow(dead_code)] // جزء من زوج cfg-mirror: يُستدعى على ويندوز فقط
 fn run_power_command(_program: &str, _args: &[&str]) -> Result<(), String> {
     Err("إجراءات الطاقة متاحة على ويندوز فقط".into())
 }
 
 /// تنفيذ أوامر الطاقة: إغلاق وسكون أصليان عبر windows-sys، مع حدث
-/// power://action لإخبار الواجهة بما حدث.
+/// <power://action> لإخبار الواجهة بما حدث.
 #[tauri::command]
 fn shutdown_device(app: tauri::AppHandle, seconds: Option<u32>) -> Result<(), String> {
-    let secs = seconds.unwrap_or(30).max(0);
+    let secs = seconds.unwrap_or(30);
     shutdown_device_impl(secs)?;
     let _ = app.emit("power://action", serde_json::json!({ "action": "shutdown", "seconds": secs }));
     Ok(())
@@ -76,7 +92,7 @@ fn cancel_shutdown_impl() -> Result<(), String> {
 }
 
 /// سكون أصلي: SetSuspendState(false, false, false) عبر windows-sys
-/// (بدل rundll32) من داخل spawn_blocking لأنه استدعاء حاجب.
+/// (بدل rundll32) من داخل `spawn_blocking` لأنه استدعاء حاجب.
 #[tauri::command]
 async fn sleep_device(app: tauri::AppHandle) -> Result<(), String> {
     let r = tauri::async_runtime::spawn_blocking(sleep_device_impl)
@@ -119,7 +135,7 @@ fn quit_app(app: tauri::AppHandle) {
 }
 
 /// منتقي ملفات أصلي لملف .torrent (بدون اعتماديات إضافية):
-/// PowerShell OpenFileDialog على ويندوز، وخطأ عربي واضح في غير ذلك.
+/// PowerShell `OpenFileDialog` على ويندوز، وخطأ عربي واضح في غير ذلك.
 #[tauri::command]
 fn pick_torrent_file() -> Result<Option<String>, String> {
     #[cfg(target_os = "windows")]
@@ -148,7 +164,8 @@ fn pick_torrent_file() -> Result<Option<String>, String> {
 
 /// فتح مجلد الملف المحفوظ في مدير ملفات النظام (وتحديد الملف على ويندوز).
 #[tauri::command]
-fn open_path(path: String) -> Result<(), String> {    let p = std::path::PathBuf::from(&path);
+fn open_path(path: String) -> Result<(), String> {
+    let p = std::path::PathBuf::from(&path);
     if !p.exists() {
         return Err(format!("المسار غير موجود: {path}"));
     }
@@ -204,7 +221,7 @@ fn disk_free(path: Option<String>) -> Result<u64, String> {
             let pb = std::path::PathBuf::from(&p);
             let mut dir = pb.clone();
             if pb.is_file() {
-                dir = pb.parent().map(|x| x.to_path_buf()).unwrap_or(pb);
+                dir = pb.parent().map(std::path::Path::to_path_buf).unwrap_or(pb);
             }
             dir
         }
@@ -291,7 +308,7 @@ static AUX_PENDING: std::sync::Mutex<AuxPayload> = std::sync::Mutex::new(AuxPayl
 /// نافذة مساعدة جاهزة: أعد بياناتها المعلّقة (إن وُجدت) ثم امسحها.
 #[tauri::command]
 fn aux_ready(kind: String) -> Option<AuxPayload> {
-    let mut p = AUX_PENDING.lock().unwrap_or_else(|e| e.into_inner());
+    let mut p = AUX_PENDING.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
     if p.kind == kind {
         Some(std::mem::replace(
             &mut *p,
@@ -323,7 +340,7 @@ async fn add_download_from_aux(
             "لا يمكن تحميل روابط blob الداخلية — افتح الرابط الأصلي للملف وأعد المحاولة".into(),
         );
     }
-    let later = cfg.get("later").and_then(|v| v.as_bool()).unwrap_or(false);
+    let later = cfg.get("later").and_then(serde_json::Value::as_bool).unwrap_or(false);
     // magnet و .torrent من مسار ملف محلي → محرك التورنت.
     let is_torrent = lower.starts_with("magnet:")
         || (lower.starts_with("file://") && lower.ends_with(".torrent"));
@@ -348,9 +365,9 @@ async fn add_download_from_aux(
         app.state::<download::EngineHandle>(),
         url,
         cfg.get("savePath").and_then(|v| v.as_str()).unwrap_or("").to_string(),
-        cfg.get("threads").and_then(|v| v.as_u64()).unwrap_or(8) as u32,
+        cfg.get("threads").and_then(serde_json::Value::as_u64).unwrap_or(8) as u32,
         cfg.get("category").and_then(|v| v.as_str()).unwrap_or("software").to_string(),
-        cfg.get("description").and_then(|v| v.as_str()).map(|s| s.to_string()),
+        cfg.get("description").and_then(|v| v.as_str()).map(std::string::ToString::to_string),
     )
     .await?;
     if later {
@@ -411,7 +428,7 @@ pub fn run() {
             }
             extension::start_server(handle.clone());
             let engine = Arc::new(Engine {
-                items: StdMutex::new(Default::default()),
+                items: StdMutex::new(std::collections::HashMap::new()),
                 limiter: Arc::new(SpeedLimiter::new()),
                 client: reqwest::Client::builder()
                     .user_agent("UltraDM/1.0")
@@ -437,9 +454,7 @@ pub fn run() {
                 tauri::async_runtime::spawn(async move {
                     let dir = handle
                         .path()
-                        .app_data_dir()
-                        .map(|d| d.join("torrents"))
-                        .unwrap_or_else(|_| std::path::PathBuf::from("."));
+                        .app_data_dir().map_or_else(|_| std::path::PathBuf::from("."), |d| d.join("torrents"));
                     match torrent::TorrentEngine::new(dir).await {
                         Ok(engine) => {
                             let engine = Arc::new(engine);
@@ -547,7 +562,7 @@ mod tests {
     fn app_info_reports_thread_cap() {
         let info = app_info();
         assert_eq!(info.max_threads, 32);
-        assert!(!info.version.is_empty());
+        assert_ne!(info.version, "");
     }
 
     #[cfg(not(target_os = "windows"))]

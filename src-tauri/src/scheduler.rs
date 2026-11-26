@@ -37,17 +37,13 @@ fn minutes_of(t: &str) -> Option<u32> {
 }
 
 /// هل "now" داخل النافذة [start, end)؟ يدعم عبور منتصف الليل.
+#[must_use]
 pub fn in_window(start: &str, end: &str, now: u32, weekday: u32) -> bool {
     let (Some(s), Some(e)) = (minutes_of(start), minutes_of(end)) else {
         return false;
     };
-    let day_ok = match start_kind(end, start) {
-        _ => {
-            let _ = weekday;
-            true
-        }
-    };
-    let _ = day_ok;
+    // تصنيف الأيام (يومي/أيام عمل) يُطبَّق في من يستدعي عبر day_matches.
+    let _ = weekday;
     if s == e {
         return false;
     }
@@ -58,9 +54,8 @@ pub fn in_window(start: &str, end: &str, now: u32, weekday: u32) -> bool {
     }
 }
 
-fn start_kind(_end: &str, _start: &str) -> () {}
-
 /// تطبيق تصنيف الأيام: 6=سبت، 7=أحد (احتساب أوروبي-عربي) أو يومي.
+#[must_use]
 pub fn day_matches(kind: &str, weekday: u32) -> bool {
     match kind {
         "weekdays" => (1..=5).contains(&weekday),
@@ -78,7 +73,11 @@ pub fn scheduler_set_rules(state: State<'_, std::sync::Arc<Scheduler>>, rules: V
             return Err(format!("توقيت غير صالح: {} ← {}", r.start, r.end));
         }
     }
-    *state.rules.lock().unwrap() = rules.clone();
+    state
+        .rules
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+        .clone_from(&rules);
     Ok(SchedulerStateInfo { active: false, rules })
 }
 
@@ -87,7 +86,7 @@ pub fn spawn_scheduler(app: AppHandle, sched: std::sync::Arc<Scheduler>) {
     tauri::async_runtime::spawn(async move {
         loop {
             tokio::time::sleep(Duration::from_secs(30)).await;
-            let rules: Vec<ScheduleRule> = sched.rules.lock().unwrap().clone();
+            let rules: Vec<ScheduleRule> = sched.rules.lock().unwrap_or_else(std::sync::PoisonError::into_inner).clone();
             if rules.is_empty() {
                 continue;
             }
