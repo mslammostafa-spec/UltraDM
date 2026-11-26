@@ -7,13 +7,14 @@ import { inDesktop, exitApp } from "../lib/ipc";
 import { checkForUpdates, type UpdateStatus } from "../lib/updater";
 
 export function ToolbarButton({
-  onClick, disabled, children, variant = "ghost", label,
+  onClick, disabled, children, variant = "ghost", label, className,
 }: {
   onClick?: () => void;
   disabled?: boolean;
   children: React.ReactNode;
   variant?: "ghost" | "primary" | "torrent" | "danger";
   label: string;
+  className?: string;
 }) {
   const styles: Record<string, React.CSSProperties> = {
     ghost: { background: "var(--surface-2)", color: "var(--text)" },
@@ -27,9 +28,9 @@ export function ToolbarButton({
       disabled={disabled}
       aria-label={label}
       title={label}
-      className="flex items-center gap-2 rounded-xl h-10 px-3.5 text-[13px] font-semibold transition-all duration-150 ease-out
+      className={`flex items-center gap-2 rounded-xl h-10 px-3.5 text-[13px] font-semibold transition-all duration-150 ease-out
                  hover:brightness-105 active:scale-[0.97] disabled:opacity-40 disabled:pointer-events-none
-                 focus-visible:outline-2 focus-visible:-outline-offset-2 cursor-pointer"
+                 focus-visible:outline-2 focus-visible:-outline-offset-2 cursor-pointer ${className ?? ""}`}
       style={{ ...styles[variant], outlineColor: "var(--color-accent)", boxShadow: "var(--shadow-1)" }}
     >
       {children}
@@ -79,7 +80,7 @@ export default function Toolbar({
         if ((e.target as HTMLElement).closest("button, a, input, select, [role=\"button\"]")) return;
         void apiMax();
       }}
-      className="relative z-50 flex items-center gap-2 px-4 h-16 border-b shrink-0 select-none pointer-events-auto min-w-0 max-w-full"
+      className="sticky top-0 z-50 flex items-center gap-2 px-4 h-16 border-b shrink-0 select-none pointer-events-auto min-w-0 max-w-full overflow-x-auto overflow-y-hidden [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
       style={{ background: "var(--surface)", borderColor: "var(--border)" }}
     >
       {/* زر X: إنهاء حقيقي للبرنامج (يخرج من التطبيق بالكامل).
@@ -113,8 +114,8 @@ export default function Toolbar({
       )}
 
       {/* منطقة الأزرار: مستثناة تماماً من السحب — كل نقرة تعمل ولا تُكبّر النافذة. */}
-      <div className="flex items-center gap-2 h-full">
-      <div data-tauri-drag-region="false" className="flex items-center gap-2">
+      <div className="flex items-center gap-2 h-full min-w-0 flex-1">
+      <div data-tauri-drag-region="false" className="flex items-center gap-2 shrink-0">
         <ToolbarButton variant="primary" label="إضافة رابط تحميل" onClick={() => { flash("link"); onAddLink(); }}>
           <Link2 size={17} />
           <span className="hidden min-[1100px]:inline whitespace-nowrap">إضافة رابط</span>
@@ -129,36 +130,36 @@ export default function Toolbar({
       <div className="w-px h-7 mx-1" style={{ background: "var(--border)" }} />
 
       {!trash && (
-        <ToolbarButton label="إيقاف مؤقت" disabled={!canPause} onClick={() => { flash("pause"); onPause(); }}>
+        <ToolbarButton className="shrink-0" label="إيقاف مؤقت" disabled={!canPause} onClick={() => { flash("pause"); onPause(); }}>
           <Pause size={16} className={pulse === "pause" ? "animate-pulse" : ""} />
         </ToolbarButton>
       )}
       {trash ? (
-        <ToolbarButton label="استعادة المحدد" disabled={!canResume} onClick={() => { flash("resume"); onResume(); }}>
+        <ToolbarButton className="shrink-0" label="استعادة المحدد" disabled={!canResume} onClick={() => { flash("resume"); onResume(); }}>
           <Undo2 size={16} className={pulse === "resume" ? "animate-pulse" : ""} />
         </ToolbarButton>
       ) : (
-        <ToolbarButton label="استئناف" disabled={!canResume} onClick={() => { flash("resume"); onResume(); }}>
+        <ToolbarButton className="shrink-0" label="استئناف" disabled={!canResume} onClick={() => { flash("resume"); onResume(); }}>
           <Play size={16} className={pulse === "resume" ? "animate-pulse" : ""} />
         </ToolbarButton>
       )}
-      <ToolbarButton variant="danger" label={trash ? "مسح نهائي" : "حذف"} disabled={!canDelete} onClick={onDelete}>
+      <ToolbarButton className="shrink-0" variant="danger" label={trash ? "مسح نهائي" : "حذف"} disabled={!canDelete} onClick={onDelete}>
         <Trash2 size={16} />
       </ToolbarButton>
 
       <div className="w-px h-7 mx-1" style={{ background: "var(--border)" }} />
 
       <div data-tauri-drag-region="false">
-        <ToolbarButton label="الجدولة" onClick={onScheduler}>
+        <ToolbarButton className="shrink-0" label="الجدولة" onClick={onScheduler}>
           <CalendarClock size={16} />
           <span className="hidden min-[1200px]:inline">الجدولة</span>
         </ToolbarButton>
       </div>
 
-      <div className="flex-1" />
+      <div className="flex-1 min-w-1 shrink" />
 
-      <div data-tauri-drag-region="false" className="flex items-center gap-2">
-        <ToolbarButton label={dark ? "الوضع النهاري" : "الوضع الليلي"} onClick={onToggleTheme}>
+      <div data-tauri-drag-region="false" className="flex items-center gap-2 shrink-0">
+        <ToolbarButton className="shrink-0" label={dark ? "الوضع النهاري" : "الوضع الليلي"} onClick={onToggleTheme}>
           {dark ? <Sun size={17} /> : <Moon size={17} />}
         </ToolbarButton>
         <ToolbarButton
@@ -170,10 +171,10 @@ export default function Toolbar({
         >
           <RefreshCw size={16} />
         </ToolbarButton>
-        <ToolbarButton label="حول البرنامج" onClick={() => onAbout(null)}>
+        <ToolbarButton className="shrink-0" label="حول البرنامج" onClick={() => onAbout(null)}>
           <Info size={16} />
         </ToolbarButton>
-        <ToolbarButton label="الإعدادات والمظهر" onClick={onOpenSettings}>
+        <ToolbarButton className="shrink-0" label="الإعدادات والمظهر" onClick={onOpenSettings}>
           <Settings size={17} />
         </ToolbarButton>
       </div>
