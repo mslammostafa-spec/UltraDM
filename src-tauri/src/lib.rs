@@ -69,6 +69,126 @@ fn exit_app(app: tauri::AppHandle) {
     app.exit(0);
 }
 
+/// فتح مجلد الملف المحفوظ في مدير ملفات النظام (وتحديد الملف على ويندوز).
+#[tauri::command]
+fn open_path(path: String) -> Result<(), String> {
+    let p = std::path::PathBuf::from(&path);
+    if !p.exists() {
+        return Err(format!("المسار غير موجود: {path}"));
+    }
+    #[cfg(target_os = "windows")]
+    {
+        use std::os::windows::process::CommandExt;
+        const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+        if p.is_file() {
+            // explorer /select يُبرز الملف داخل مجلده.
+            std::process::Command::new("explorer.exe")
+                .arg(format!("/select,{}", p.display()))
+                .creation_flags(CREATE_NO_WINDOW)
+                .spawn()
+                .map_err(|e| e.to_string())?;
+        } else {
+            std::process::Command::new("explorer.exe")
+                .arg(&p)
+                .creation_flags(CREATE_NO_WINDOW)
+                .spawn()
+                .map_err(|e| e.to_string())?;
+        }
+        Ok(())
+    }
+    #[cfg(target_os = "macos")]
+    {
+        let program = if p.is_file() { "open" } else { "open" };
+        std::process::Command::new(program)
+            .arg(&p)
+            .spawn()
+            .map_err(|e| e.to_string())?;
+        Ok(())
+    }
+    #[cfg(all(unix, not(target_os = "macos")))]
+    {
+        std::process::Command::new("xdg-open")
+            .arg(&p)
+            .spawn()
+            .map_err(|e| e.to_string())?;
+        Ok(())
+    }
+    #[cfg(not(any(unix, target_os = "windows")))]
+    {
+        let _ = p;
+        Err("غير مدعوم على هذا النظام".into())
+    }
+}
+
+/// المساحة الحرة للقرص الذي يحتوي المسار (بالبايت) — لبطاقة "سرعة الكتابة على القرص".
+#[tauri::command]
+fn disk_free(path: Option<String>) -> Result<u64, String> {
+    let target = match path {
+        Some(p) if !p.is_empty() => {
+            let pb = std::path::PathBuf::from(&p);
+            let mut dir = pb.clone();
+            if pb.is_file() {
+                dir = pb.parent().map(|x| x.to_path_buf()).unwrap_or(pb);
+            }
+            dir
+        }
+        _ => dirs::home_dir().unwrap_or_else(|| std::path::PathBuf::from("/")),
+    };
+    free_space_of(&target)
+}
+
+fn free_space_of(dir: &std::path::Path) -> Result<u64, String> {
+    #[cfg(target_os = "windows")]
+    {
+        use windows_sys::Win32::Storage::FileSystem::{
+            GetDiskFreeSpaceExW, ULARGE_INTEGER,
+        };
+        use std::os::windows::ffi::OsStrExt;
+        let wide: Vec<u16> = dir
+            .as_os_str()
+            .encode_wide()
+            .chain(std::iter::once(0))
+            .collect();
+        let mut free: ULARGE_INTEGER = 0;
+        let ok = unsafe {
+            GetDiskFreeSpaceExW(wide.as_ptr(), std::ptr::null_mut(), std::ptr::null_mut(), &mut free)
+        };
+        if ok == 0 {
+            return Err("فشل قياس المساحة الحرة".into());
+        }
+        Ok(free)
+    }
+    #[cfg(not(target_os = "windows"))]
+    {
+        // statfs عبر libc: المسموح كتابته (f_bavail) × حجم الكتلة.
+        #[repr(C)]
+        struct StatFs {
+            f_type: i64,
+            f_bsize: i64,
+            f_blocks: u64,
+            f_bfree: u64,
+            f_bavail: u64,
+            // بقية الحقول لا تهمّنا؛ حجم البنية يجب أن يكفي النظام.
+            _pad: [u64; 15],
+        }
+        extern "C" {
+            fn statfs(path: *const u8, buf: *mut StatFs) -> i32;
+        }
+        let mut buf = StatFs {
+            f_type: 0, f_bsize: 0, f_blocks: 0, f_bfree: 0, f_bavail: 0,
+            _pad: [0; 15],
+        };
+        let c = dir.as_os_str().to_string_lossy();
+        let mut bytes = c.as_bytes().to_vec();
+        bytes.push(0);
+        let rc = unsafe { statfs(bytes.as_ptr(), &mut buf) };
+        if rc != 0 {
+            return Err("فشل قياس المساحة الحرة".into());
+        }
+        Ok(buf.f_bavail.saturating_mul(buf.f_bsize as u64))
+    }
+}
+
 #[tauri::command]
 fn app_info() -> AppInfo {
     AppInfo {
@@ -226,6 +346,8 @@ pub fn run() {
             download::engine_list,
             download::engine_set_threads,
             download::engine_set_speed_limit,
+            open_path,
+            disk_free,
             settings::load_settings,
             settings::save_settings,
             torrent::torrent_add,

@@ -2,16 +2,31 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import Sidebar from "./components/Sidebar";
 import Toolbar from "./components/Toolbar";
-import DownloadTable from "./components/DownloadTable";
+import SpeedGauge from "./components/SpeedGauge";
+import DownloadCards from "./components/DownloadCards";
+import TelemetryPanel from "./components/TelemetryPanel";
+
 import SpeedChart, { type Sample } from "./components/SpeedChart";
 import BottomBar from "./components/BottomBar";
+
+function StatCard({ label, value }: { label: string; value: string }) {
+  return (
+    <div
+      className="rounded-xl px-3 py-2.5 text-center"
+      style={{ background: "var(--surface-2)", border: "1px solid var(--border)" }}
+    >
+      <div className="text-[11px]" style={{ color: "var(--muted)" }}>{label}</div>
+      <div className="text-[14px] font-extrabold tabular-nums mt-0.5" style={{ color: "var(--text)" }}>{value}</div>
+    </div>
+  );
+}
 import { SchedulerDialog, type ScheduleRule } from "./components/Dialogs";
 import { DownloadInfoDialog, DownloadProgressDialog, type StartConfig } from "./components/DownloadDialogs";
 import SettingsDialog from "./components/SettingsDialog";
 import AboutDialog from "./components/AboutDialog";
 import type { UpdateStatus } from "./lib/updater";
 import { ListFilter } from "lucide-react";
-import { inDesktop, engineAdd, enginePause, engineResume, engineCancel, registerTorrentHandler, requestPower, runAfterFinish, matchesFilter, parseFilterId, type AfterFinish, type Download } from "./lib/ipc";
+import { inDesktop, engineAdd, enginePause, engineResume, engineCancel, registerTorrentHandler, requestPower, runAfterFinish, matchesFilter, parseFilterId, openPath, type AfterFinish, type Download } from "./lib/ipc";
 import { DEFAULT_SETTINGS, applyTheme, type Settings } from "./lib/themes";
 import { loadSettings, saveSettings } from "./lib/settings";
 import { fileNameFromUrl, previewDownloads, previewSizeFor } from "./lib/format";
@@ -226,6 +241,7 @@ export default function App() {
     (checked: boolean) => setSelected(checked ? new Set(rows.map((r) => r.id)) : new Set()),
     [rows],
   );
+  void selectAll;
 
   const addDownload = async (cfg: StartConfig, later: boolean, torrent: boolean) => {
     const name = fileNameFromUrl(cfg.url);
@@ -316,6 +332,40 @@ export default function App() {
   const selectedRows = (inTrash ? deleted : downloads).filter((d) => selected.has(d.id));
   const SidebarIcon = ListFilter;
 
+  // إحصاءات لوحة السرعة الرئيسية (مشتقة من الصفوف النشطة).
+  const activeRows = downloads.filter((d) => d.status === "downloading");
+  const totalBps = activeRows.reduce((a, d) => a + d.speedBps, 0);
+  const peakTotalBps = downloads.reduce((a, d) => a + d.peakSpeedBps, 0);
+  const totalBytes = downloads.reduce((a, d) => a + (d.sizeBytes * d.progress) / 100, 0);
+  const remainingBytes = downloads.reduce((a, d) => a + d.sizeBytes * (1 - d.progress / 100), 0);
+  const etaSeconds = totalBps > 0 && remainingBytes > 0 ? remainingBytes / totalBps : null;
+  const avgBps = activeRows.length > 0 ? totalBps / activeRows.length : 0;
+  const historyRows = useMemo(
+    () =>
+      downloads
+        .slice()
+        .sort((a, b) => (b.etaSeconds ?? Infinity) - (a.etaSeconds ?? Infinity))
+        .slice(0, 3)
+        .map((d) => ({
+          id: d.id,
+          name: d.name,
+          meta: `${Math.round(d.progress)}٪ · ${d.threads} مسار`,
+        })),
+    [downloads],
+  );
+  const fmtBytes = (b: number) => {
+    if (b >= 1024 ** 3) return `${(b / 1024 ** 3).toFixed(1)} GB`;
+    if (b >= 1024 ** 2) return `${(b / 1024 ** 2).toFixed(1)} MB`;
+    return `${(b / 1024).toFixed(0)} KB`;
+  };
+  const fmtSpeed = (b: number) => `${fmtBytes(b)}/s`;
+  const fmtEta = (s: number | null) => {
+    if (s == null || !isFinite(s)) return "—";
+    const m = Math.floor(s / 60);
+    const sec = Math.round(s % 60);
+    return m >= 60 ? `${Math.floor(m / 60)} س ${m % 60} د` : `${m} د ${sec} ث`;
+  };
+
   return (
     <div className="h-full flex" style={{ background: "var(--bg)" }}>
       {/* على الشاشات الصغيرة يصبح الشريط الجانبي منزلاً يُفتح من زر عائم */}
@@ -369,15 +419,48 @@ export default function App() {
           canDelete={selectedRows.length > 0}
         />
 
-        <DownloadTable
-          rows={rows}
-          selected={selected}
-          onToggle={toggle}
-          onSelectAll={selectAll}
-          onAdd={() => setInfo({ url: "", torrent: false })}
-        />
+        {/* لوحة السرعة الرئيسية: العداد + المخطط الموجي + بطاقات الإحصاء */}
+        <section
+          aria-label="لوحة سرعة التحميل"
+          className="mx-4 mt-4 rounded-3xl p-5 flex flex-wrap items-center gap-6"
+          style={{ background: "var(--surface)", border: "1px solid var(--border)", boxShadow: "var(--shadow-1)" }}
+        >
+          <SpeedGauge bps={totalBps} peakBps={peakTotalBps} />
 
-        <SpeedChart history={history} />
+          <div
+            className="flex-1 min-w-[240px] rounded-2xl p-4"
+            style={{ background: "var(--surface-2)", border: "1px solid var(--border)" }}
+          >
+            <div className="flex items-center justify-between mb-2">
+              <span
+                className="text-[12.5px] font-bold rounded-full px-3 py-1"
+                style={{ background: "var(--color-accent)", color: "#06231a" }}
+              >
+                32 مسار نشط
+              </span>
+            </div>
+            <SpeedChart history={history} />
+            <div className="grid grid-cols-3 gap-3 mt-3">
+              <StatCard label="البيانات المستلمة" value={fmtBytes(totalBytes)} />
+              <StatCard label="الوقت المتبذر" value={fmtEta(etaSeconds)} />
+              <StatCard label="السرعة المتوسطبة" value={`${fmtSpeed(avgBps)}`} />
+            </div>
+          </div>
+        </section>
+
+        {/* بطاقات التحميل المقسّمة */}
+        <section className="flex-1 min-h-0 overflow-y-auto px-4 py-4" aria-label="التحميلات النشطة">
+          <DownloadCards
+            rows={rows}
+            selected={selected}
+            onToggle={toggle}
+            onOpenFolder={(d) => {
+              const p = d.savePath;
+              if (!p) return;
+              openPath(p).catch(() => setMessage("تعذّر فتح المجلد."));
+            }}
+          />
+        </section>
 
         <BottomBar
           action={after}
@@ -388,6 +471,23 @@ export default function App() {
         />
       </main>
 
+      <TelemetryPanel
+        history={history}
+        totalBps={totalBps}
+        peakBps={peakTotalBps}
+        historyRows={historyRows}
+        onResumeAll={() => {
+          if (PREVIEW) return setStatus(["paused", "error"], "downloading");
+          selectedRows.filter((d) => d.status === "paused" || d.status === "error").forEach((d) => engineResume(d.id).catch(() => {}));
+          setStatus(["paused", "error"], "downloading");
+        }}
+        onPauseAll={() => {
+          if (PREVIEW) return setStatus(["downloading", "queued"], "paused");
+          selectedRows.filter((d) => d.status === "downloading" || d.status === "queued").forEach((d) => enginePause(d.id).catch(() => {}));
+          setStatus(["downloading", "queued"], "paused");
+        }}
+        onOpenSettings={() => setSettingsOpen(true)}
+      />
       {dialog === "scheduler" && (
         <SchedulerDialog onClose={() => setDialog(null)} rules={rules} setRules={setRules} />
       )}

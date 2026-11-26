@@ -198,6 +198,14 @@ export async function cancelShutdown(): Promise<void> {
   await invoke("cancel_shutdown");
 }
 
+export async function openPath(path: string): Promise<void> {
+  await invoke("open_path", { path });
+}
+
+export async function diskFree(path?: string): Promise<number> {
+  return await invoke<number>("disk_free", { path: path ?? null });
+}
+
 interface EngineSnapshot {
   id: string;
   url: string;
