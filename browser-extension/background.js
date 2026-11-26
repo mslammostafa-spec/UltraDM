@@ -51,7 +51,15 @@ function dedupe(url) {
 
 function deliver(payload) {
   // الأولوية لقناة WebSocket (سرعة فائقة)، وNative Messaging بديل عند غيابها.
-  if (wsReady && ws && ws.send(JSON.stringify(payload))) return true;
+  // ملاحظة: ws.send() تُعيد undefined دائمًا؛ النجاح هو وجود القناة في حالة OPEN.
+  if (wsReady && ws && ws.readyState === WebSocket.OPEN) {
+    try {
+      ws.send(JSON.stringify(payload));
+      return true;
+    } catch {
+      // القناة انقطعت للتو — جرّب القناة البديلة.
+    }
+  }
   return sendNative(payload);
 }
 

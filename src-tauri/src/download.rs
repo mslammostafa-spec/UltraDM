@@ -267,8 +267,24 @@ fn file_name_from_url(url: &str) -> String {
         .to_string()
 }
 
+/// تنقية اسم ملف قادم من ترويسة: إزالة المحارف الممنوعة والاقتباسات والمسارات.
+fn sanitize_file_name(name: &str) -> String {
+    let cleaned: String = name
+        .rsplit(['/', '\\'])
+        .next()
+        .unwrap_or(name)
+        .chars()
+        .filter(|c| !matches!(c, ':' | '*' | '?' | '"' | '<' | '>' | '|'))
+        .collect();
+    let trimmed = cleaned.trim().trim_end_matches('.').to_string();
+    if trimmed.is_empty() { file_name_from_url("download") } else { trimmed }
+}
+
 /// استعلام الحجم: HEAD أولًا، وإذا رفض الخادم نجرّب GET بنطاق بايت واحد.
-async fn probe(url: &str, client: &Client) -> Result<(u64, Option<String>, Option<String>, bool), String> {
+async fn probe(
+    url: &str,
+    client: &Client,
+) -> Result<(u64, Option<String>, Option<String>, bool, Option<String>), String> {
     let read = |r: &reqwest::Response| {
         let accepts = r
             .headers()
@@ -284,13 +300,16 @@ async fn probe(url: &str, client: &Client) -> Result<(u64, Option<String>, Optio
             .unwrap_or(0);
         let etag = r.headers().get("etag").and_then(|v| v.to_str().ok().map(String::from));
         let lm = r.headers().get("last-modified").and_then(|v| v.to_str().ok().map(String::from));
-        (size, etag, lm, accepts)
+        // الاسم الحقيقي من ترويسة Content-Disposition إن وُجدت (filename / filename*).
+        let cd = r.headers().get("content-disposition").and_then(|v| v.to_str().ok());
+        let name = cd.and_then(file_name_from_disposition);
+        (size, etag, lm, accepts, name)
     };
     let resp = client.head(url).send().await.map_err(|e| e.to_string())?;
     if resp.status().is_success() {
-        let (size, etag, lm, accepts) = read(&resp);
+        let (size, etag, lm, accepts, name) = read(&resp);
         if size > 0 {
-            return Ok((size, etag, lm, accepts));
+            return Ok((size, etag, lm, accepts, name));
         }
     }
     // احتياط: GET مع Range: bytes=0-0
@@ -303,7 +322,7 @@ async fn probe(url: &str, client: &Client) -> Result<(u64, Option<String>, Optio
     if !resp.status().is_success() {
         return Err(format!("HTTP {}", resp.status()));
     }
-    let (mut size, etag, lm, accepts) = read(&resp);
+    let (mut size, etag, lm, accepts, name) = read(&resp);
     let partial = resp.status().as_u16() == 206;
     if partial {
         if let Some(cr) = resp.headers().get("content-range").and_then(|v| v.to_str().ok()) {
@@ -311,9 +330,65 @@ async fn probe(url: &str, client: &Client) -> Result<(u64, Option<String>, Optio
                 size = total;
             }
         }
-        return Ok((size, etag, lm, true));
+        return Ok((size, etag, lm, true, name));
     }
-    Ok((size, etag, lm, accepts))
+    Ok((size, etag, lm, accepts, name))
+}
+
+/// استخراج اسم الملف من ترويسة Content-Disposition مع دعم RFC 5987 (filename*=).
+fn file_name_from_disposition(value: &str) -> Option<String> {
+    let decode_ext = |v: &str| {
+        let (charset, rest) = v.split_once('\'')?;
+        let raw = rest.split('\'').next().unwrap_or(rest);
+        percent_decode(raw, charset.eq_ignore_ascii_case("utf-8"))
+    };
+    // filename*= لها الأولوية (UTF-8 غالبًا) ثم filename.
+    for part in value.split(';') {
+        let part = part.trim();
+        if let Some(ext) = part.strip_prefix("filename*=") {
+            if let Some(n) = decode_ext(ext.trim()) {
+                if !n.is_empty() {
+                    return Some(n);
+                }
+            }
+        }
+    }
+    for part in value.split(';') {
+        let part = part.trim();
+        if let Some(n) = part.strip_prefix("filename=") {
+            let n = n.trim().trim_matches('"');
+            if !n.is_empty() {
+                return Some(n.to_string());
+            }
+        }
+    }
+    None
+}
+
+/// فك ترميز النسبة (%XX) إلى UTF-8 أو Latin-1 حسب مجموعة الأحرف المعلنة.
+fn percent_decode(raw: &str, utf8: bool) -> Option<String> {
+    let bytes: Vec<u8> = {
+        let src = raw.as_bytes();
+        let mut out = Vec::with_capacity(src.len());
+        let mut i = 0;
+        while i < src.len() {
+            if src[i] == b'%' && i + 2 < src.len() {
+                let hex = std::str::from_utf8(&src[i + 1..i + 3]).ok()?;
+                let b = u8::from_str_radix(hex, 16).ok()?;
+                out.push(b);
+                i += 3;
+            } else {
+                out.push(src[i]);
+                i += 1;
+            }
+        }
+        out
+    };
+    if utf8 {
+        String::from_utf8(bytes).ok()
+    } else {
+        Some(bytes.iter().map(|&b| b as char).collect())
+    }
 }
 
 fn persist_item(item: &DownloadItem, chunks: Vec<ChunkState>, etag: Option<String>, last_modified: Option<String>, accepts_ranges: bool) {
@@ -490,9 +565,9 @@ async fn run_download(
     // الاستئناف الفوري (Zero-Latency Resume): إذا توفّر checkpoint كامل
     // (حجم + نطاقات مقبولة) نطلق كل الخيوط فورًا من إزاحاتها المحفوظة
     // دون أي طلب HEAD إضافي — ETag وLast-Modified من الـ checkpoint.
-    let (size, etag, last_modified, accepts_ranges) = match &saved_meta {
+    let (size, etag, last_modified, accepts_ranges, _cd_name) = match &saved_meta {
         Some(m) if m.size > 0 && m.accepts_ranges => {
-            (m.size, m.etag.clone(), m.last_modified.clone(), true)
+            (m.size, m.etag.clone(), m.last_modified.clone(), true, None)
         }
         _ => probe(&url, &engine.client).await?,
     };
@@ -833,8 +908,11 @@ pub async fn engine_add(
         return Err("الرابط يجب أن يكون http/https".into());
     }
     let threads = threads.clamp(1, MAX_THREADS);
-    let (size, _etag, _lm, _ar) = probe(&url, &state.0.client).await?;
-    let name = file_name_from_url(&url);
+    let (size, _etag, _lm, _ar, cd_name) = probe(&url, &state.0.client).await?;
+    let name = cd_name
+        .filter(|n| !n.trim().is_empty())
+        .map(|n| sanitize_file_name(n.trim()))
+        .unwrap_or_else(|| file_name_from_url(&url));
     let path = if save_path.is_empty() {
         name.clone()
     } else if save_path.ends_with(['/', '\\']) {
