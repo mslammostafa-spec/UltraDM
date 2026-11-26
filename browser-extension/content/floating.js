@@ -209,7 +209,7 @@
       ev.stopPropagation();
       const url = currentMediaUrl(container);
       if (!url) { flash(btn, "لا يوجد فيديو في هذه الصفحة"); return; }
-      openQualityMenu(btn, url);
+      void openQualityMenu(btn, url);
     });
     return btn;
   }

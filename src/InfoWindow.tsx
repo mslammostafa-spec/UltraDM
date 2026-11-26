@@ -10,7 +10,7 @@ export default function InfoWindow() {
 
   useEffect(() => {
     // نفس ثيم النافذة الرئيسية (من localStorage المشترك بين نوافذ التطبيق).
-    import("./lib/themes").then(({ applyTheme }) => {
+    void import("./lib/themes").then(({ applyTheme }) => {
       applyTheme(localStorage.getItem("ultradm.theme") || "glass-emerald-cyan");
     });
     if (!isTauri()) return;

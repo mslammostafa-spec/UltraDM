@@ -13,13 +13,19 @@ export default function AboutDialog({
 
   return (
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4"
-      onClick={onClose}
+      className="fixed inset-0 z-50 flex items-center justify-center p-4"
+      role="dialog"
+      aria-modal="true"
     >
+      <button
+        type="button"
+        aria-label="إغلاق"
+        onClick={onClose}
+        className="absolute inset-0 bg-black/50 cursor-default"
+      />
       <div
-        className="w-full max-w-md rounded-2xl border shadow-2xl p-6 space-y-4"
+        className="relative w-full max-w-md rounded-2xl border shadow-2xl p-6 space-y-4"
         style={{ background: "var(--surface)", borderColor: "var(--border)" }}
-        onClick={(e) => e.stopPropagation()}
       >
         <div className="flex items-center justify-between">
           <h2 className="text-lg font-bold flex items-center gap-2" style={{ color: "var(--text)" }}>

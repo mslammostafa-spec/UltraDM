@@ -73,7 +73,12 @@ export default function Toolbar({
   return (
     <header
       data-tauri-drag-region
-      onDoubleClick={() => { if (desktop) apiMax(); }}
+      onDoubleClick={(e) => {
+        if (!desktop) return;
+        // تجاهل النقر المزدوج على الأزرار وعناصر التحكم — لا تكبير للنافذة.
+        if ((e.target as HTMLElement).closest("button, a, input, select, [role=\"button\"]")) return;
+        void apiMax();
+      }}
       className="relative z-50 flex items-center gap-2 px-4 h-16 border-b shrink-0 select-none pointer-events-auto min-w-0 max-w-full"
       style={{ background: "var(--surface)", borderColor: "var(--border)" }}
     >
@@ -108,11 +113,7 @@ export default function Toolbar({
       )}
 
       {/* منطقة الأزرار: مستثناة تماماً من السحب — كل نقرة تعمل ولا تُكبّر النافذة. */}
-      <div
-        className="flex items-center gap-2 h-full"
-        onMouseDown={(e) => e.stopPropagation()}
-        onDoubleClick={(e) => e.stopPropagation()}
-      >
+      <div className="flex items-center gap-2 h-full">
       <div data-tauri-drag-region="false" className="flex items-center gap-2">
         <ToolbarButton variant="primary" label="إضافة رابط تحميل" onClick={() => { flash("link"); onAddLink(); }}>
           <Link2 size={17} />

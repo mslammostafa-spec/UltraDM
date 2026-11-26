@@ -83,7 +83,7 @@ export default function App() {
   // تحميل الإعدادات المحفوظة عند البدء ثم تطبيق الثيم منها ودفع إعدادات
   // حماية SSD إلى محرك الخلفية.
   useEffect(() => {
-    loadSettings().then(async (s) => {
+    void loadSettings().then(async (s) => {
       setSettings(s);
       const t = syncThemeDom(s.theme);
       setThemeId(t.id);
@@ -126,7 +126,7 @@ export default function App() {
   useEffect(() => {
     if (PREVIEW) return;
     let un: (() => void) | undefined;
-    import("@tauri-apps/api/event").then(({ listen }) => {
+    void import("@tauri-apps/api/event").then(({ listen }) => {
       const p1 = listen<EngineSnapshotLike>("download://progress", (e) => {
         const s = e.payload;
         setDownloads((ds) => {
@@ -154,7 +154,7 @@ export default function App() {
         const u = e.payload.url;
         openInfo(u, u.startsWith("magnet:?") || /\.torrent([?#]|$)/i.test(u));
       });
-      Promise.all([p1, p2, p3]).then(([u1, u2, u3]) => {
+      void Promise.all([p1, p2, p3]).then(([u1, u2, u3]) => {
         un = () => {
           u1();
           u2();
@@ -398,7 +398,7 @@ export default function App() {
   };
   const fmtSpeed = (b: number) => `${fmtBytes(b)}/s`;
   const fmtEta = (s: number | null) => {
-    if (s == null || !isFinite(s)) return "—";
+    if (s == null || !Number.isFinite(s)) return "—";
     const m = Math.floor(s / 60);
     const sec = Math.round(s % 60);
     return m >= 60 ? `${Math.floor(m / 60)} س ${m % 60} د` : `${m} د ${sec} ث`;
@@ -418,13 +418,18 @@ export default function App() {
       {sidebarOpen && (
         <div
           className="lg:hidden fixed inset-0 z-40"
-          style={{ background: "rgba(0,0,0,.45)" }}
-          onClick={() => setSidebarOpen(false)}
+          role="dialog"
+          aria-modal="true"
         >
+          <button
+            type="button"
+            aria-label="إغلاق القائمة"
+            onClick={() => setSidebarOpen(false)}
+            className="absolute inset-0 bg-black/45 cursor-default"
+          />
           <div
             id="drawer"
-            className="h-full w-[262px] max-w-[85vw] shadow-2xl"
-            onClick={(e) => e.stopPropagation()}
+            className="relative h-full w-[262px] max-w-[85vw] shadow-2xl"
           >
             <Sidebar
               active={active}

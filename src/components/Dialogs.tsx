@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { X, Link, Magnet, Upload } from "lucide-react";
 import { MAX_THREADS, type Category } from "../lib/ipc";
 import { categoryFromName, fileNameFromUrl } from "../lib/format";
@@ -17,10 +17,23 @@ export function Modal({
     return () => window.removeEventListener("keydown", onKey);
   }, [onClose]);
 
+  // تركيز أول حقل إدخال داخل النافذة عند الفتح (بديل autoFocus الصريح).
+  const bodyRef = useRef<HTMLDivElement | null>(null);
+  useEffect(() => {
+    bodyRef.current?.querySelector<HTMLElement>("input, textarea, select")?.focus();
+  }, []);
+
   return (
     <div className="fixed inset-0 z-50 grid place-items-center p-6" role="dialog" aria-modal="true" aria-label={title}>
-      <div className="absolute inset-0 bg-black/45 animate-in" onClick={onClose} style={{ animation: "fade 150ms ease-out" }} />
+      <button
+        type="button"
+        aria-label="إغلاق"
+        onClick={onClose}
+        className="absolute inset-0 bg-black/45 animate-in cursor-default"
+        style={{ animation: "fade 150ms ease-out" }}
+      />
       <div
+        ref={bodyRef}
         className={`relative w-full ${wide ? "max-w-2xl" : "max-w-lg"} rounded-3xl p-6 shadow-xl max-h-[90vh] overflow-auto`}
         style={{ background: "var(--surface)", boxShadow: "var(--shadow-2)", animation: "rise 200ms ease-out" }}
       >
@@ -37,7 +50,6 @@ export function Modal({
         </div>
         {children}
       </div>
-      <style>{`@keyframes fade{from{opacity:0}to{opacity:1}}@keyframes rise{from{opacity:0;transform:translateY(14px) scale(.98)}to{opacity:1;transform:none}}`}</style>
     </div>
   );
 }
@@ -94,7 +106,7 @@ export function AddLinkDialog({
       <div className="flex items-center gap-2 rounded-xl h-12 px-3 mb-2" style={{ background: "var(--surface-2)" }}>
         <Link size={16} style={{ color: "var(--muted)" }} />
         <input
-          autoFocus
+
           dir="ltr"
           placeholder="https://example.com/file.zip"
           value={url}
@@ -137,7 +149,7 @@ export function AddTorrentDialog({
       <div className="flex items-center gap-2 rounded-xl h-12 px-3 mb-3" style={{ background: "var(--surface-2)" }}>
         <Magnet size={16} style={{ color: "var(--color-torrent)" }} />
         <input
-          autoFocus
+
           dir="ltr"
           placeholder="magnet:?xt=urn:btih:… أو رابط .torrent"
           value={url}

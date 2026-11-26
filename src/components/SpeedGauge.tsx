@@ -41,7 +41,7 @@ export default function SpeedGauge({
     });
   }, [scaleMax]);
 
-  const value = mbps >= 100 ? mbps.toFixed(1) : mbps.toFixed(1);
+  const value = mbps.toFixed(1);
 
   return (
     <div

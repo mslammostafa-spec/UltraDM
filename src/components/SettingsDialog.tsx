@@ -123,16 +123,19 @@ export default function SettingsDialog({
   return (
     <div
       className="fixed inset-0 z-50 grid place-items-center p-4"
-      style={{ background: "rgba(0,0,0,.5)" }}
-      onClick={onClose}
       role="dialog"
       aria-modal="true"
       aria-label="الإعدادات"
     >
+      <button
+        type="button"
+        aria-label="إغلاق"
+        onClick={onClose}
+        className="absolute inset-0 bg-black/50 cursor-default"
+      />
       <div
-        className="w-full max-w-2xl max-h-[88vh] flex flex-col rounded-3xl border overflow-hidden"
+        className="relative w-full max-w-2xl max-h-[88vh] flex flex-col rounded-3xl border overflow-hidden"
         style={{ background: "var(--surface)", borderColor: "var(--border)", boxShadow: "var(--shadow-2)" }}
-        onClick={(e) => e.stopPropagation()}
       >
         <header
           className="flex items-center gap-3 px-6 h-16 border-b shrink-0"

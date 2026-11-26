@@ -23,7 +23,7 @@ const files = [];
     else files.push(p);
   }
 })(srcDir);
-files.sort();
+files.sort((a, b) => a.localeCompare(b));
 
 function dosTime(d) {
   const time = ((d.getHours() << 11) | (d.getMinutes() << 5) | (d.getSeconds() >> 1)) & 0xffff;

@@ -11,7 +11,7 @@ export default function ProgressWindow() {
 
   useEffect(() => {
     // نفس ثيم النافذة الرئيسية.
-    import("./lib/themes").then(({ applyTheme }) => {
+    void import("./lib/themes").then(({ applyTheme }) => {
       applyTheme(localStorage.getItem("ultradm.theme") || "glass-emerald-cyan");
     });
     if (!isTauri()) return;

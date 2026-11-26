@@ -23,7 +23,7 @@ export default function TelemetryPanel({
   useEffect(() => {
     let alive = true;
     const load = () => diskFree().then((v) => { if (alive) setFreeBytes(v); }).catch(() => {});
-    load();
+    void load();
     const iv = setInterval(load, 30_000);
     return () => { alive = false; clearInterval(iv); };
   }, []);

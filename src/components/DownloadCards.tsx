@@ -36,7 +36,7 @@ export default function DownloadCards({
         const isSel = selected.has(d.id);
         const segments = Math.min(32, Math.max(1, d.threads));
         return (
-          <article
+          <div
             key={d.id}
             onClick={() => onToggle(d.id)}
             role="button"
@@ -128,7 +128,7 @@ export default function DownloadCards({
                 {d.etaSeconds != null && d.status === "downloading" ? `  |  متبقٍ ${formatEta(d.etaSeconds)}` : ""}
               </span>
             </div>
-          </article>
+          </div>
         );
       })}
     </div>

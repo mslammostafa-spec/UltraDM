@@ -214,7 +214,7 @@ function scheduleReconnect() {
   if (reconnectTimer) return;
   reconnectTimer = setTimeout(() => {
     reconnectTimer = null;
-    connectWs();
+    void connectWs();
   }, RECONNECT_MS);
 }
 
@@ -271,7 +271,7 @@ chrome.runtime.onMessage.addListener((m, _sender, sendResponse) => {
     enabled = !!m.enabled;
     chrome.storage.local.set({ enabled });
     updateBadge();
-    if (enabled) { setStatus("connecting"); connectWs(); }
+    if (enabled) { setStatus("connecting"); void connectWs(); }
     else { setStatus("offline"); try { ws && ws.close(); } catch {} }
     sendResponse({ ok: true });
     return false;
@@ -307,7 +307,7 @@ chrome.storage.local.get(["theme", "enabled"], (s) => {
   if (s.theme) theme = s.theme;
   if (typeof s.enabled === "boolean") enabled = s.enabled;
   updateBadge();
-  connectWs();
+  void connectWs();
 });
 
 // إنذار كل 25 ثانية يُبقي الـService Worker حياً ويعيد المحاولة بهدوء
@@ -315,12 +315,12 @@ chrome.storage.local.get(["theme", "enabled"], (s) => {
 chrome.alarms.create("ultradm-keepalive", { periodInMinutes: 25 / 60 });
 chrome.alarms.onAlarm.addListener((a) => {
   if (a.name === "ultradm-keepalive" && enabled && (!ws || ws.readyState !== WebSocket.OPEN)) {
-    connectWs();
+    void connectWs();
   }
 });
 
 chrome.runtime.onInstalled.addListener(() => {
-  connectWs();
+  void connectWs();
   // قائمة النقر الأيمن: "تحميل عبر UltraDM" على أي رابط أو مشغل وسائط.
   chrome.contextMenus.removeAll(() => {
     chrome.contextMenus.create({
