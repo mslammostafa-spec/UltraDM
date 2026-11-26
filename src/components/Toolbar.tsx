@@ -1,10 +1,10 @@
-import { useState } from "react";
-import {
+import { X,  X,  useState } from "react";
+import { X,  X, 
   Link2, Magnet, Pause, Play, Trash2, CalendarClock, Moon, Sun, Undo2,
   Settings, RefreshCw, Info,
 } from "lucide-react";
-import { inDesktop } from "../lib/ipc";
-import { checkForUpdates, type UpdateStatus } from "../lib/updater";
+import { X,  X,  inDesktop } from "../lib/ipc";
+import { X,  X,  checkForUpdates, type UpdateStatus } from "../lib/updater";
 
 export function ToolbarButton({
   onClick, disabled, children, variant = "ghost", label,

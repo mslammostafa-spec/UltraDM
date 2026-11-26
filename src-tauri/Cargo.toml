@@ -1,6 +1,6 @@
 [package]
 name = "ultradm"
-version = "1.1.8"
+version = "1.1.9"
 description = "UltraDM — Ultra Download Manager"
 authors = ["UltraDM"]
 edition = "2021"
