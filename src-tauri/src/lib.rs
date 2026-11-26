@@ -140,16 +140,14 @@ fn disk_free(path: Option<String>) -> Result<u64, String> {
 fn free_space_of(dir: &std::path::Path) -> Result<u64, String> {
     #[cfg(target_os = "windows")]
     {
-        use windows_sys::Win32::Storage::FileSystem::{
-            GetDiskFreeSpaceExW, ULARGE_INTEGER,
-        };
+        use windows_sys::Win32::Storage::FileSystem::GetDiskFreeSpaceExW;
         use std::os::windows::ffi::OsStrExt;
         let wide: Vec<u16> = dir
             .as_os_str()
             .encode_wide()
             .chain(std::iter::once(0))
             .collect();
-        let mut free: ULARGE_INTEGER = 0;
+        let mut free: u64 = 0;
         let ok = unsafe {
             GetDiskFreeSpaceExW(wide.as_ptr(), std::ptr::null_mut(), std::ptr::null_mut(), &mut free)
         };
