@@ -49,6 +49,47 @@ function dedupe(url) {
   return true;
 }
 
+// ==== قناة WebSocket: إرسال مع مطابقة الردود بالمعرّف ومهلة زمنية ====
+let wsSeq = 0;
+const wsWaiters = new Map(); // id -> { resolve, timer }
+
+function wsSend(msg, timeoutMs) {
+  return new Promise((resolve) => {
+    if (!ws || ws.readyState !== WebSocket.OPEN) {
+      resolve(null);
+      return;
+    }
+    const id = "r" + ++wsSeq;
+    const wait = {
+      resolve,
+      timer: setTimeout(() => {
+        wsWaiters.delete(id);
+        resolve(null);
+      }, timeoutMs || 20000),
+    };
+    wsWaiters.set(id, wait);
+    msg.id = id;
+    try {
+      ws.send(JSON.stringify(msg));
+    } catch {
+      clearTimeout(wait.timer);
+      wsWaiters.delete(id);
+      resolve(null);
+    }
+  });
+}
+
+function resolveWaiters(msg) {
+  if (msg && msg.id && wsWaiters.has(msg.id)) {
+    const w = wsWaiters.get(msg.id);
+    clearTimeout(w.timer);
+    wsWaiters.delete(msg.id);
+    w.resolve(msg);
+    return true;
+  }
+  return false;
+}
+
 function deliver(payload) {
   // الأولوية لقناة WebSocket (سرعة فائقة)، وNative Messaging بديل عند غيابها.
   // ملاحظة: ws.send() تُعيد undefined دائمًا؛ النجاح هو وجود القناة في حالة OPEN.
@@ -131,7 +172,7 @@ async function connectWs() {
     setStatus("online");
     // اطلب الثيم الحالي من البرنامج ومرّر الإعدادات (فقط عندما تكون القناة OPEN فعلًا).
     if (socket.readyState === WebSocket.OPEN) {
-      socket.send(JSON.stringify({ type: "hello", extension: "ultradm", version: "1.1.6" }));
+      socket.send(JSON.stringify({ type: "hello", extension: "ultradm", version: "1.1.11" }));
     }
   };
   ws.onmessage = (ev) => {
@@ -146,6 +187,7 @@ async function connectWs() {
         broadcast({ type: "ultradm://theme", theme });
       }
       if (msg.type === "pong") return;
+      if (resolveWaiters(msg)) return;
       if (msg.type === "captured" && msg.url) {
         chrome.notifications.create({
           type: "basic",
@@ -293,6 +335,23 @@ chrome.runtime.onMessage.addListener((m, _s, respond) => {
       .then((res) => respond({ ok: !!(res && res.type === "download-started") }))
       .catch(() => respond({ ok: false }));
     return true; // استجابة غير متزامنة
+  }
+  // استعلام الجودات من الزر العائم عبر القناة الوحيدة (Service Worker).
+  if (m && m.type === "ULTRADM_PROBE") {
+    wsSend({ type: "probe", url: m.url }, 25000)
+      .then((res) => {
+        if (!res) {
+          respond({ ok: false, code: "app-offline", message: "تعذّر الاتصال ببرنامج UltraDM — افتحه وتأكد من تشغيله" });
+        } else if (res.type === "formats") {
+          respond({ ok: true, ...res });
+        } else if (res.type === "error") {
+          respond({ ok: false, code: res.code || "probe-failed", message: res.message || "فشل جلب الجودات" });
+        } else {
+          respond({ ok: false, code: "bad-reply", message: "رد غير متوقع من UltraDM" });
+        }
+      })
+      .catch(() => respond({ ok: false, code: "app-offline", message: "تعذّر الاتصال ببرنامج UltraDM — افتحه وتأكد من تشغيله" }));
+    return true;
   }
   return false;
 });

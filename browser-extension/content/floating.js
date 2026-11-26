@@ -40,55 +40,16 @@
     btn.setAttribute("aria-label", lastLabel);
   }
 
-  // ——— قناة WebSocket مع UltraDM: استعلام الجودات (probe) وبدء التحميل ———
-  let ws = null;
-  let wsSeq = 0;
-  const wsWaiters = new Map();
-
-  function wsSend(msg, timeoutMs) {
-    return new Promise((resolve) => {
-      const id = "r" + ++wsSeq;
-      const wait = { resolve, timer: setTimeout(() => {
-        wsWaiters.delete(id);
-        resolve(null);
-      }, timeoutMs || 20000) };
-      wsWaiters.set(id, wait);
-      msg.id = id;
-      const send = () => ws.send(JSON.stringify(msg));
-      if (ws && ws.readyState === 1) send();
-      else {
-        openWs(() => {
-          if (ws && ws.readyState === 1) send();
-          else {
-            clearTimeout(wait.timer);
-            wsWaiters.delete(id);
-            resolve(null);
-          }
-        });
-      }
-    });
-  }
-
-  function openWs(ready) {
-    if (ws && (ws.readyState === 0 || ws.readyState === 1)) { ready && ready(); return; }
-    try { ws = new WebSocket("ws://127.0.0.1:24580/ultradm"); } catch { return; }
-    ws.onopen = () => ready && ready();
-    ws.onmessage = (ev) => {
-      let m = null;
-      try { m = JSON.parse(ev.data); } catch { return; }
-      if (m.id && wsWaiters.has(m.id)) {
-        const w = wsWaiters.get(m.id);
-        clearTimeout(w.timer);
-        wsWaiters.delete(m.id);
-        w.resolve(m);
-      }
-    };
-    ws.onerror = () => {};
-  }
+  // ——— قناة واحدة مع UltraDM: رسائل إلى Service Worker (وهو مالك قناة
+  // WebSocket) — لا اتصال مباشر من صفحة الصورة الإضافية (المحتوى) ———
 
   async function probeFormats(url) {
-    const res = await wsSend({ type: "probe", url }, 25000);
-    return res && res.type === "formats" ? res : null;
+    try {
+      const res = await chrome.runtime.sendMessage({ type: "ULTRADM_PROBE", url });
+      return res && res.ok ? res : { ok: false, code: res && res.code, message: res && res.message };
+    } catch {
+      return { ok: false, code: "app-offline", message: "تعذّر الاتصال ببرنامج UltraDM — افتحه وتأكد من تشغيله" };
+    }
   }
 
   async function startDownload(url, fmt) {
@@ -99,12 +60,7 @@
     } else if (fmt.id && fmt.id !== "best") {
       msg.format_id = fmt.id;
     }
-    // القناة الأساسية: WebSocket المباشر. البديل: رسالة ULTRADM_DOWNLOAD إلى
-    // الـService Worker (وهو الذي يعرف حالة الاتصال ويعيد المحاولة بصمت).
-    try {
-      const res = await wsSend(msg, 15000);
-      if (res && res.type === "download-started") return true;
-    } catch { /* جرّب القناة البديلة */ }
+    // القناة الأساسية: WebSocket عبر الـService Worker.
     try {
       const res = await chrome.runtime.sendMessage({ type: "ULTRADM_DOWNLOAD", ...msg });
       return !!(res && res.ok);
@@ -194,8 +150,9 @@
     btn.classList.add("loading");
     const cached = await probeFormats(url);
     btn.classList.remove("loading");
-    if (!cached || !Array.isArray(cached.formats) || !cached.formats.length) {
-      flash(btn, "تعذّر جلب الجودات — افتح UltraDM");
+    if (!cached || !cached.ok || !Array.isArray(cached.formats) || !cached.formats.length) {
+      // رسالة صادقة: نعرف الفرق بين "البرنامج مغلق" و"yt-dlp فشل على هذا الرابط".
+      flash(btn, (cached && cached.message) || "تعذّر جلب الجودات — افتح UltraDM");
       return;
     }
     buildMenu(btn, cached.title, cached.formats, url, btn);
