@@ -8,7 +8,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 
 use serde::{Deserialize, Serialize};
-use tauri::{AppHandle, Emitter, State};
+use tauri::{AppHandle, Emitter, Manager, State};
 use tokio::io::{AsyncBufReadExt, BufReader};
 use tokio::process::Child;
 
@@ -204,6 +204,7 @@ pub async fn media_probe(url: String) -> Result<MediaInfo, String> {
             tool_cmd_sync("yt-dlp")
                 .arg("-J")
                 .arg("--no-playlist")
+                .arg("--")
                 .arg(&url_arg)
                 .stdout(Stdio::piped())
                 .stderr(Stdio::piped()),
@@ -286,8 +287,14 @@ pub async fn media_probe(url: String) -> Result<MediaInfo, String> {
     subs.extend(collect("automatic_captions", "auto"));
     subs.sort_by(|a, b| a.lang.cmp(&b.lang).then(a.kind.cmp(&b.kind)));
 
-    let is_hls = url.contains(".m3u8") || out.contains("m3u8");
-    let is_dash = url.contains(".mpd") || out.contains("\"protocol\": \"http_dash_segments\"") || out.contains("dash");
+    // كشف نوع البث من حقل extractor (موثوق) أو امتداد الرابط، لا من النص الخام
+    // لكامل مخرجات yt-dlp — كلمة "Dashcam" في عنوان فيديو كانت تُصنّفه DASH خطأً.
+    let is_hls = url.contains(".m3u8")
+        || extractor.contains("HLS")
+        || out.contains("\"protocol\": \"m3u8");
+    let is_dash = url.contains(".mpd")
+        || extractor.contains("DASH")
+        || out.contains("\"protocol\": \"http_dash_segments\"");
     Ok(MediaInfo {
         title,
         extractor,
@@ -354,6 +361,8 @@ pub fn build_args(req: &MediaRequest) -> Vec<String> {
     if mode == "embed" {
         a.push("--embed-metadata".into());
     }
+    // فاصل "--": أي رابط يبدأ بـ"-" (من صفحة مزوّرة) يُفسَّر رابطًا لا خيارًا.
+    a.push("--".into());
     a.push(req.url.clone());
     a
 }
@@ -411,6 +420,13 @@ pub async fn media_download(app: AppHandle, state: State<'_, MediaHandle>, req: 
         let err = if done { None } else { Some(last_line.clone().unwrap_or_else(|| "أُلغي".into())) };
         let percent = if done { 100.0 } else { job2.lock().unwrap_or_else(std::sync::PoisonError::into_inner).percent };
         let _ = app2.emit("media://progress", MediaProgress { id: id2.clone(), percent, line: last_line.unwrap_or_default(), done: true, error: err });
+        // تنظيف الوظيفة المنتهية من الذاكرة (كانت تبقى في الـHashMap إلى الأبد).
+        if let Some(st) = app2.try_state::<MediaHandle>() {
+            st.jobs
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .remove(&id2);
+        }
     });
     Ok(id)
 }

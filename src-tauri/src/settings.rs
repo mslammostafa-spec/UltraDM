@@ -1,5 +1,6 @@
 use std::fs;
 use std::path::PathBuf;
+use std::sync::RwLock;
 use tauri::Manager;
 
 fn settings_path(app: &tauri::AppHandle) -> Result<PathBuf, String> {
@@ -8,6 +9,29 @@ fn settings_path(app: &tauri::AppHandle) -> Result<PathBuf, String> {
         .app_config_dir()
         .map_err(|e| e.to_string())?;
     Ok(dir.join("settings.json"))
+}
+
+/// ذاكرة مؤقتة للثيم: كانت settings.json تُقرأ من القرص مع كل اتصال
+/// WebSocket جديد — الآن تُحدَّث عند الكتابة فقط.
+static THEME_CACHE: RwLock<Option<String>> = RwLock::new(None);
+
+/// الثيم الحالي: من الذاكرة المؤقتة، وإلا من settings.json (وتُعبَّئ الذاكرة).
+pub fn cached_theme(app: &tauri::AppHandle) -> String {
+    if let Ok(t) = THEME_CACHE.read() {
+        if let Some(t) = t.as_deref() {
+            return t.to_owned();
+        }
+    }
+    let theme = load_settings(app.clone())
+        .ok()
+        .flatten()
+        .and_then(|raw| serde_json::from_str::<serde_json::Value>(&raw).ok())
+        .and_then(|v| v.get("theme").and_then(|t| t.as_str()).map(String::from))
+        .unwrap_or_else(|| "glass-emerald-cyan".into());
+    if let Ok(mut t) = THEME_CACHE.write() {
+        *t = Some(theme.clone());
+    }
+    theme
 }
 
 /// قراءة الإعدادات المحفوظة (نص JSON خام)؛ يعيد null عند عدم وجود ملف.
@@ -29,6 +53,14 @@ pub fn save_settings(app: tauri::AppHandle, json: String) -> Result<(), String> 
     }
     // تحقق أن المحتوى JSON صالح قبل كتابته
     serde_json::from_str::<serde_json::Value>(&json).map_err(|e| e.to_string())?;
+    // تحديث ذاكرة الثيم فورًا حتى لا يقرأ خادم الإضافة قيمة قديمة.
+    if let Ok(v) = serde_json::from_str::<serde_json::Value>(&json) {
+        if let Some(t) = v.get("theme").and_then(|t| t.as_str()) {
+            if let Ok(mut c) = THEME_CACHE.write() {
+                *c = Some(t.to_owned());
+            }
+        }
+    }
     fs::write(&path, json).map_err(|e| e.to_string())
 }
 

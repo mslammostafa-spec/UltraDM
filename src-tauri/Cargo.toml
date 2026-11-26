@@ -1,6 +1,6 @@
 [package]
 name = "ultradm"
-version = "1.1.21"
+version = "1.1.22"
 description = "UltraDM — Ultra Download Manager"
 authors = ["UltraDM"]
 edition = "2021"
@@ -17,6 +17,7 @@ tauri-build = { version = "2", features = [] }
 tauri = { version = "2", features = ["tray-icon"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
+chrono = { version = "0.4", default-features = false, features = ["clock"] }
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "fs", "io-util", "sync", "time", "net", "process"] }
 tokio-util = "0.7"
 reqwest = { version = "0.12", default-features = false, features = ["http2", "http3", "rustls-tls", "stream"] }

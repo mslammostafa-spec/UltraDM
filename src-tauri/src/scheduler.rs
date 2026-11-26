@@ -1,5 +1,6 @@
 //! مجدول التحميلات: نوافذ زمنية تبدأ وتوقف الطابور تلقائيًا (مباشر وتورنت).
 
+use crate::settings;
 use serde::{Deserialize, Serialize};
 use std::sync::Mutex;
 use std::time::Duration;
@@ -64,21 +65,49 @@ pub fn day_matches(kind: &str, weekday: u32) -> bool {
     }
 }
 
-/// تحديث قواعد الجدولة من الواجهة.
+/// تحديث قواعد الجدولة من الواجهة (وتُحفَظ في settings.json لتبقى بعد إعادة التشغيل).
 #[tauri::command]
-pub fn scheduler_set_rules(state: State<'_, std::sync::Arc<Scheduler>>, rules: Vec<ScheduleRule>) -> Result<SchedulerStateInfo, String> {
+pub fn scheduler_set_rules(app: tauri::AppHandle, state: State<'_, std::sync::Arc<Scheduler>>, rules: Vec<ScheduleRule>) -> Result<SchedulerStateInfo, String> {
     // تحقق من صحة التوقيتات قبل الحفظ.
     for r in &rules {
         if minutes_of(&r.start).is_none() || minutes_of(&r.end).is_none() {
             return Err(format!("توقيت غير صالح: {} ← {}", r.start, r.end));
         }
     }
+    save_rules_to_disk(&app, &rules);
     state
         .rules
         .lock()
         .unwrap_or_else(std::sync::PoisonError::into_inner)
         .clone_from(&rules);
     Ok(SchedulerStateInfo { active: false, rules })
+}
+
+const SCHED_KEY: &str = "schedule_rules";
+
+/// قراءة قواعد الجدولة المحفوظة من settings.json (قائمة فارغة إن لم توجد).
+#[must_use]
+pub fn load_rules_from_disk(app: &tauri::AppHandle) -> Vec<ScheduleRule> {
+    let raw = settings::load_settings(app.clone()).ok().flatten();
+    let Some(text) = raw else { return Vec::new() };
+    let Ok(v) = serde_json::from_str::<serde_json::Value>(&text) else { return Vec::new() };
+    serde_json::from_value(v.get(SCHED_KEY).cloned().unwrap_or(serde_json::Value::Null)).unwrap_or_default()
+}
+
+/// كتابة قواعد الجدولة داخل settings.json مع الإبقاء على بقية المفاتيح.
+pub fn save_rules_to_disk(app: &tauri::AppHandle, rules: &[ScheduleRule]) {
+    let mut root = settings::load_settings(app.clone())
+        .ok()
+        .flatten()
+        .and_then(|t| serde_json::from_str::<serde_json::Map<String, serde_json::Value>>(&t).ok())
+        .unwrap_or_default();
+    root.insert(
+        SCHED_KEY.into(),
+        serde_json::to_value(rules).unwrap_or(serde_json::Value::Null),
+    );
+    if let Ok(text) = serde_json::to_string(&root) {
+        let _ = settings::save_settings(app.clone(), text);
+    }
 }
 
 /// حلقة المجدول: كل 30 ثانية تفحص النوافذ وتصدر الحالة.
@@ -101,19 +130,17 @@ pub fn spawn_scheduler(app: AppHandle, sched: std::sync::Arc<Scheduler>) {
 }
 
 fn chrono_now_minutes() -> u32 {
-    let now = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .unwrap_or_default();
-    let secs = now.as_secs() % 86_400;
-    (secs / 60) as u32
+    // التوقيت المحلي: جداول "23:00 إلى 08:00" يجب أن تعمل بتوقيت المستخدم
+    // لا UTC (كان الانحراف بقدر فرق المنطقة الزمنية).
+    use chrono::Timelike;
+    let now = chrono::Local::now();
+    now.hour() * 60 + now.minute()
 }
 
 fn chrono_now_weekday() -> u32 {
-    // الأيام من الأحد=0 .. السبت=6 (UTC مبسّط)
-    let now = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .unwrap_or_default();
-    ((now.as_secs() / 86_400) % 7) as u32
+    // الاثنين=1 .. الأحد=7 (يتطابق مع day_matches) بتوقيت المستخدم المحلي.
+    use chrono::Datelike;
+    chrono::Local::now().weekday().number_from_monday()
 }
 
 #[cfg(test)]

@@ -33,6 +33,9 @@ pub struct TorrentSnapshot {
 }
 
 struct TorrentItem {
+    /// معرّف ثابت يُسند عند الإضافة ولا يتغير — كان الترتيب في القائمة هو
+    /// الهوية فأي إزاحة مستقبلية تجعل id=3 يشير إلى تورنت آخر.
+    id: u64,
     handle: Arc<librqbit::ManagedTorrent>,
     name: String,
 }
@@ -101,10 +104,11 @@ pub struct TorrentHandle(pub Arc<TorrentEngine>);
 
 async fn get_handle(engine: &TorrentEngine, id: u64) -> Result<Arc<librqbit::ManagedTorrent>, String> {
     let items = engine.items.lock().await;
-    if id == 0 || id as usize > items.len() {
-        return Err("معرّف غير موجود".into());
-    }
-    Ok(items[id as usize - 1].handle.clone())
+    items
+        .iter()
+        .find(|it| it.id == id)
+        .map(|it| it.handle.clone())
+        .ok_or_else(|| "معرّف غير موجود".into())
 }
 
 #[tauri::command]
@@ -135,7 +139,7 @@ pub async fn torrent_add(
     let name: String = handle
         .name()
         .unwrap_or_else(|| format!("مغناطيس {id}"));
-    let item = TorrentItem { handle, name };
+    let item = TorrentItem { id, handle, name };
     let snap = TorrentEngine::snapshot(&item, id);
     engine.items.lock().await.push(item);
     let _ = Emitter::emit(&app, "torrent://progress", &snap);
@@ -148,8 +152,7 @@ pub async fn torrent_list(state: State<'_, TorrentHandle>) -> Result<Vec<Torrent
     let items = engine.items.lock().await;
     Ok(items
         .iter()
-        .enumerate()
-        .map(|(i, it)| TorrentEngine::snapshot(it, (i as u64) + 1))
+        .map(|it| TorrentEngine::snapshot(it, it.id))
         .collect())
 }
 
@@ -183,7 +186,11 @@ pub async fn torrent_remove(
         .session
         .delete(handle.info_hash().into(), delete_files)
         .await
-        .map_err(|e| e.to_string())
+        .map_err(|e| e.to_string())?;
+    // إزالة العنصر من القائمة: كانت تبقى إلى الأبد (تسريب ذاكرة) وكانت
+    // معرّفات بقية التورنتات ترتبط بمواضع القائمة.
+    engine.items.lock().await.retain(|it| it.id != id);
+    Ok(())
 }
 
 /// التحقق من بصمة SHA-256 لملف مكتمل (الملف الأول إذا كان التورنت متعدد الملفات).
@@ -240,8 +247,7 @@ pub fn spawn_progress_task(app: AppHandle, engine: Arc<TorrentEngine>) {
                 let items = engine.items.lock().await;
                 items
                     .iter()
-                    .enumerate()
-                    .map(|(i, it)| TorrentEngine::snapshot(it, (i as u64) + 1))
+                    .map(|it| TorrentEngine::snapshot(it, it.id))
                     .collect()
             };
             for s in snaps {

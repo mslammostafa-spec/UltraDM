@@ -38,7 +38,8 @@ ${Using:StrFunc} StrRep
   FileOpen $R1 "$INSTDIR\browser-extension\native-host.json" w
   FileWrite $R1 '{"name": "com.ultradm.bridge",$\n'
   FileWrite $R1 ' "description": "UltraDM Native Messaging Bridge",$\n'
-  FileWrite $R1 ' "path": "$R0\UltraDM.exe",$\n'
+  FileWrite $R1 ' "path": "$R0\\UltraDM.exe",$\n'
+  FileWrite $R1 ' "args": ["--native-host"],$\n'
   FileWrite $R1 ' "type": "stdio",$\n'
   FileWrite $R1 ' "allowed_origins": [$\n'
   FileWrite $R1 '   "chrome-extension://kpjldkbninldcnhfjnbpbenejifihobc/"$\n'

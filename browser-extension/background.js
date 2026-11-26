@@ -198,7 +198,8 @@ async function connectWs() {
     setStatus("online");
     // اطلب الثيم الحالي من البرنامج ومرّر الإعدادات (فقط عندما تكون القناة OPEN فعلًا).
     if (socket.readyState === WebSocket.OPEN) {
-      socket.send(JSON.stringify({ type: "hello", extension: "ultradm", version: "1.1.15" }));
+      // النسخة من manifest نفسه — قيمة يدوية قديمة تخدع أي تشخيص لاحق.
+      socket.send(JSON.stringify({ type: "hello", extension: "ultradm", version: chrome.runtime.getManifest().version }));
     }
   };
   ws.onmessage = (ev) => {
@@ -388,7 +389,14 @@ chrome.runtime.onMessage.addListener((m, _s, respond) => {
           });
           return { ok: r.ok, transport: "http" };
         } catch {
-          return { ok: false, transport: "none" };
+          // تشخيص صادق بدل رسالة واحدة لكل الفشل (برنامج مغلق / قناة محجوبة).
+          return {
+            ok: false,
+            transport: "none",
+            code: "app-offline",
+            message: "تعذّر الوصول إلى برنامج UltraDM عبر كل القنوات — افتحه، وإن كنت على بريف فعِّل " +
+                     "«تثبيت الربط تلقائيًا» من إعدادات البرنامج (قناة Native Messaging الوحيدة التي لا يحجبها بريف)",
+          };
         }
       })
       .then(respond)

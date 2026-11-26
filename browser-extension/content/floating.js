@@ -122,9 +122,6 @@
       const it = document.createElement("button");
       it.className = "ultradm-menu-item";
       it.type = "button";
-      it.innerHTML =
-        '<span class="ultradm-menu-q">' + f.label + (f.ext ? " (" + f.ext + ")" : "") + "</span>" +
-        (f.size ? '<span class="ultradm-menu-size">' + fmtSize(f.size) + "</span>" : "");
       it.addEventListener("click", async (ev) => {
         ev.preventDefault();
         ev.stopPropagation();
@@ -134,6 +131,18 @@
         closeMenus();
         flash(btn, ok ? "بدأ التحميل في UltraDM ✓" : "تعذّر إرسال التحميل");
       });
+      // نصوص الجودات تأتي من yt-dlp (عناوين غير مُهرَّبة): textContent فقط
+      // — innerHTML هنا يعني إمكانية حقن HTML في سياق سكربت المحتوى.
+      const q = document.createElement("span");
+      q.className = "ultradm-menu-q";
+      q.textContent = f.label + (f.ext ? " (" + f.ext + ")" : "");
+      it.appendChild(q);
+      if (f.size) {
+        const sz = document.createElement("span");
+        sz.className = "ultradm-menu-size";
+        sz.textContent = fmtSize(f.size);
+        it.appendChild(sz);
+      }
       menu.appendChild(it);
     });
     document.body.appendChild(menu);
@@ -189,7 +198,12 @@
   // يبحث عن أقرب مشغل وسائط لنقطة تركيز في الصفحة.
   function currentMediaUrl(container) {
     const v = container.querySelector("video, audio");
-    if (v && (v.currentSrc || v.src)) return v.currentSrc || v.src;
+    const raw = v && (v.currentSrc || v.src);
+    // تجاهل الروابط المؤقتة blob:/mediastream: — على يوتيوب تكون دائمًا قيمة
+    // الوسيط فكانت تُعاد قبل الوصول لمنطق استخراج رابط الفيديو الحقيقي
+    // ويفشل yt-dlp ("تعذّر جلب الجودات"). كبسولة يوتيوب تستخدم رابط الصفحة
+    // فتعمل — هذا هو الفرق بين الزرين.
+    if (raw && !/^(blob:|mediastream:|data:)/i.test(raw)) return raw;
     // يوتيوب: استخرج معرّف الفيديو من الرابط وأرسله كطلب جودات.
     const m = location.href.match(
       /(?:youtube\.com\/(?:watch\?.*v=|shorts\/)|youtu\.be\/)([\w-]{11})/i,
@@ -317,7 +331,19 @@
   const prevAttach = attach;
   attach = function () { prevAttach(); attachYt(); };
 
-  const mo = new MutationObserver(() => attach());
+  // ——— حلقة ربط خفيفة ———
+  // MutationObserver على شجرة يوتيوب الكاملة يطلق مئات المرات في الدقيقة
+  // (يوتيوب يغيّر DOM باستمرار) وكل استدعاء يمسح الصفحة كلها — debounce
+  // يقلّص العمل إلى فحص واحد كل 500 مهلة على الأكثر.
+  let attachTimer = null;
+  function scheduleAttach() {
+    if (attachTimer) return;
+    attachTimer = setTimeout(() => {
+      attachTimer = null;
+      attach();
+    }, 500);
+  }
+  const mo = new MutationObserver(scheduleAttach);
   mo.observe(document.documentElement, { childList: true, subtree: true });
   attach();
   setInterval(attach, 3000); // المشغلات الديناميكية (SPA)

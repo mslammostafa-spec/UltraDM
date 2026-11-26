@@ -611,6 +611,8 @@ async fn run_download(
     // وضع حماية SSD: ملفات ضمن الحد المسموح تُحمَّل كاملة في الذاكرة ثم
     // تُكتب على القرص كتابة تسلسلية واحدة عند الاكتمال (دورة كتابة واحدة).
     // إذا تجاوز استهلاك RAM النظام 75% نتراجع تلقائيًا للكتابة على القرص.
+    // الاستئناف (total_initial > 0) يذهب دائمًا للقرص: مخزن RAM جديد يبدأ
+    // أصفارًا بينما الأجزاء المحفوظة تعلن اكتمالها فتُفقَد بياناتها.
     let (ram_first, ram_limit) = {
         let c = engine.cache.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
         (c.ram_first, c.ram_full_limit_bytes)
@@ -618,15 +620,18 @@ async fn run_download(
     let use_ram = ram_first
         && size > 0
         && size <= ram_limit
+        && total_initial == 0
         && system_ram_usable_fraction().map_or(true, |used| used < 0.75);
 
     let ram: Option<Arc<Mutex<Vec<u8>>>> = if use_ram {
         Some(Arc::new(Mutex::new(vec![0u8; size as usize])))
     } else {
-        // الملف الجزئي نفسه هو مخزن الحالة: الاستئناف يكتب فوقه من آخر إزاحة.
+        // الملف الجزئي نفسه هو مخزن الحالة: الاستئناف يكتب فوقه من آخر إزاحة،
+        // لذا لا يجوز truncate — كان يمسح البايتات المستلمة ويترك الأجزاء
+        // المحفوظة معلَمة "منجزة" فوق أصفار (تلف صامت عند كل استئناف).
         let file = tokio::fs::OpenOptions::new()
             .create(true)
-            .truncate(true)
+            .truncate(false)
             .write(true)
             .open(&path)
             .await
@@ -693,16 +698,23 @@ async fn run_download(
         )));
     }
 
+    // أي JoinError (انهيار مهمة) كان يُتجاهل صامتًا فيُعلَن الاكتمال دون
+    // اكتمال — الآن يتحول إلى خطأ حقيقي قابل للاستئناف.
     let result: Result<(), String> = futures_util::future::join_all(handles)
         .await
         .into_iter()
-        .filter_map(std::result::Result::ok)
-        .find(std::result::Result::is_err)
+        .find_map(|r| match r {
+            Ok(Ok(())) => None,
+            Ok(Err(e)) => Some(Err(e)),
+            Err(join_err) => Some(Err(format!("انهار خيط تحميل: {join_err}"))),
+        })
         .unwrap_or(Ok(()));
     ck_handle.abort();
 
     // تفريغ مخزن الذاكرة إلى الملف النهائي بكتابة تسلسلية واحدة، ثم تحرير
-    // الذاكرة فورًا. عند الاكتمال يكون الملف جاهزًا للتشغيل بلا أي دمج إضافي.
+    // الذاكرة فورًا. عند الإيقاف المؤقت/الإلغاء نكتب الجزء المستلم كملف جزئي
+    // (الأصفار في الفجوات تُعاد جلبها لأن الأجزاء المحفوظة لا تعلنها منجزة)
+    // لكن لا يُعد الاكتمال حاصلًا إلا إذا وصل المُستلم إلى الحجم الكامل.
     if let Some(buf_arc) = &shared.ram {
         // كتابة متزامنة حتى لا يُحتفظ بقفل الذاكرة عبر نقطة انتظار.
         let buf = buf_arc.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
@@ -724,6 +736,14 @@ async fn run_download(
         if on_disk != size {
             return Err(format!(
                 "فشل التحقق من الحجم: المتوقع {size} بايت والمكتوب {on_disk} بايت — أعد المحاولة للاستئناف"
+            ));
+        }
+        // تحقق ثانٍ من البايتات المستلمة فعليًا: يحمي وضع RAM-First من
+        // الإعلان عن "منجز" لملف ناقص (الأصفار المخصصة مسبقًا تطابق الحجم).
+        let received = shared.received.load(std::sync::atomic::Ordering::Relaxed);
+        if received < size {
+            return Err(format!(
+                "اكتملت المهام قبل اكتمال البايتات: {received} من {size} — أعد المحاولة للاستئناف"
             ));
         }
     }
@@ -808,6 +828,16 @@ async fn download_chunk(
             };
             let mut written = 0usize;
             while written < bytes.len() {
+                // مراقبة ضغط RAM أثناء التحميل في وضع RAM-First: إذا امتلأت
+                // الذاكرة نفشل المهمة (قابلة للاستئناف على القرص) بدل سحب
+                // النظام بأكمله — كان الفحص يُجرى مرة واحدة قبل التخصيص فقط.
+                if shared.ram.is_some()
+                    && written == 0
+                    && system_ram_usable_fraction().is_some_and(|used| used >= 0.90)
+                {
+                    net_err = Some("نفدت ذاكرة النظام — أوقف التحميل مؤقتًا أو أوقف وضع RAM-First".into());
+                    break;
+                }
                 let grant = engine.limiter.acquire(bytes.len() - written, &cancel).await;
                 if grant == 0 {
                     let _ = sink.flush().await;

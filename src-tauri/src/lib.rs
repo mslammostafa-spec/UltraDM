@@ -393,9 +393,77 @@ fn lower_process_priority() {
 fn lower_process_priority() {}
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
+/// مضيف Native Messaging حقيقي: حلقة stdin بطول-بادئة (u32 little-endian)
+/// مع JSON، تُمرَّر كل رسالة إلى خادم البرنامج المحلي عبر POST /native
+/// وتُكتَب إجابته على stdout بنفس التأطير. لا واجهة رسومية هنا.
+///
+/// البرنامج مغلق؟ تُعاد رسالة تشخيص واضحة بدل انقطاع صامت.
+pub fn native_host_main() {
+    use std::io::{Read, Write};
+
+    let mut stdin = std::io::stdin().lock();
+    let mut stdout = std::io::stdout().lock();
+    loop {
+        // قراءة طول الرسالة (4 بايت LE) ثم جسمها.
+        let mut len_buf = [0u8; 4];
+        if stdin.read_exact(&mut len_buf).is_err() {
+            break; // أغلق المتصفح القناة: خروج نظيف.
+        }
+        let len = u32::from_le_bytes(len_buf) as usize;
+        if len == 0 || len > 4 * 1024 * 1024 {
+            break;
+        }
+        let mut msg = vec![0u8; len];
+        if stdin.read_exact(&mut msg).is_err() {
+            break;
+        }
+        let raw = String::from_utf8_lossy(&msg).to_string();
+
+        // توجيه الرسالة إلى الخادم المحلي: يرسل نفس النص عبر HTTP خام
+        // (بلا اعتماديات إضافية) ويقرأ الجواب كاملًا.
+        let reply = post_local(&raw).unwrap_or_else(|| {
+            serde_json::json!({
+                "type": "error",
+                "code": "app-closed",
+                "message": "برنامج UltraDM غير مفتوح — افتحه أولًا ثم أعد المحاولة"
+            })
+            .to_string()
+        });
+
+        let bytes = reply.as_bytes();
+        if stdout.write_all(&(bytes.len() as u32).to_le_bytes()).is_err() {
+            break;
+        }
+        if stdout.write_all(bytes).is_err() || stdout.flush().is_err() {
+            break;
+        }
+    }
+}
+
+/// POST خام إلى 127.0.0.1:24580/native — يُعيد جسم الجواب عند نجاح 200 فقط.
+fn post_local(body: &str) -> Option<String> {
+    use std::io::{Read, Write};
+    let mut stream = std::net::TcpStream::connect(("127.0.0.1", 24580)).ok()?;
+    stream.set_read_timeout(Some(std::time::Duration::from_secs(120))).ok()?;
+    stream.set_write_timeout(Some(std::time::Duration::from_secs(10))).ok()?;
+    let req = format!(
+        "POST /native HTTP/1.1\r\nHost: 127.0.0.1:24580\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+        body.len()
+    );
+    stream.write_all(req.as_bytes()).ok()?;
+    let mut resp = Vec::new();
+    stream.read_to_end(&mut resp).ok()?;
+    let text = String::from_utf8_lossy(&resp);
+    let body = {
+        let (_, body) = text.split_once("\r\n\r\n")?;
+        body.to_string()
+    };
+    let status_ok = text.lines().next()?.contains(" 200 ");
+    if status_ok { Some(body) } else { None }
+}
+
 pub fn run() {
-    let silent = std::env::args().any(|a| a == "--ultradm-silent");
-    tauri::Builder::default()
+    let silent = std::env::args().any(|a| a == "--ultradm-silent");    tauri::Builder::default()
         // نسخة واحدة فقط: أي تشغيل ثانٍ (أو رابط من المتصفح) يعيد النافذة
         // المفتوحة إلى المقدمة بدل فتح نسخة جديدة بأيقونة ثانية في شريط المهام.
         .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
@@ -470,10 +538,12 @@ pub fn run() {
                 });
             }
 
-            // المجدول التلقائي للطابور.
+            // المجدول التلقائي للطابور: تُحمَّل القواعد من settings.json لتصمد
+            // بعد إعادة التشغيل (كانت في الذاكرة فقط وتُمسح عند الإغلاق).
             {
+                let rules = scheduler::load_rules_from_disk(&handle);
                 let sched = Arc::new(scheduler::Scheduler {
-                    rules: std::sync::Mutex::new(Vec::new()),
+                    rules: std::sync::Mutex::new(rules),
                 });
                 handle.manage(sched.clone());
                 scheduler::spawn_scheduler(handle.clone(), sched);

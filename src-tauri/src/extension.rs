@@ -122,6 +122,22 @@ async fn handle_conn(app: AppHandle, mut stream: tokio::net::TcpStream) -> Resul
         let _ = stream.write_all(resp.as_bytes()).await;
         return Ok(());
     }
+    // POST /native: قناة مضيف Native Messaging — يعيد جسم الطلب (JSON) عبر
+    // نفس معالج الرسائل فتجيب القناة بتنسيق الجودات/الأخطاء نفسه.
+    if text.starts_with("POST /native") {
+        let body = text.split("\r\n\r\n").nth(1).unwrap_or("").trim().to_string();
+        let reply = match handle_message(&app, &body).await {
+            Some(json) => json,
+            None => "{\"type\":\"error\",\"code\":\"bad-message\"}".into(),
+        };
+        let resp = format!(
+            "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nAccess-Control-Allow-Origin: *\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+            reply.len(),
+            reply
+        );
+        let _ = stream.write_all(resp.as_bytes()).await;
+        return Ok(());
+    }
     // POST /add: إضافة تحميل من أي صفحة (CORS مفتوح) — يقبل JSON
     // {"url": "..."} أو نصًا خامًا، ويجيب 204 ويفتح نافذة "معلومات التحميل".
     if text.starts_with("POST /add") {
@@ -146,18 +162,27 @@ async fn handle_conn(app: AppHandle, mut stream: tokio::net::TcpStream) -> Resul
     if !text.starts_with("GET /ultradm") {
         return Err("مسار غير معروف".into());
     }
-    // حماية أمنية: لا يُقبل الاتصال إلا من إضافة متصفح حقيقية (Origin خاص بالإضافة)
-    // أو عبر Native Messaging (بلا ترويسة Origin). أي عملية محلية أخرى تُرفض.
+    // حماية أمنية: يُقبل الاتصال من إضافة متصفح حقيقية فقط.
+    // - كروم/بريف/إيدج: يجب أن يطابق معرّف الإضافة القائمة المسموحة
+    //   (المعرّف الموثّق من المتجر + المعرّفات المضافة في settings.json
+    //   تحت المفتاح allowedExtensionIds) — كان يُقبل أي امتداد مثبَّت.
+    // - فايرفوكس: moz-extension://<uuid> يكون UUID فريدًا لكل تثبيت فلا
+    //   يمكن تثبيته، يُقبل بالبادئة.
     let origin: Option<String> = text
         .lines()
         .find(|l| l.to_ascii_lowercase().starts_with("origin:"))
         .and_then(|l| l.split_once(':').map(|(_, v)| v.trim().to_owned()));
     if let Some(origin) = origin {
-        let ok = ["chrome-extension://", "moz-extension://", "safari-extension://"]
-            .iter()
-            .any(|p| origin.starts_with(p));
+        let ok = if let Some(id) = origin.strip_prefix("chrome-extension://") {
+            let id = id.trim().trim_end_matches('/');
+            !id.is_empty() && allowed_extension_ids(&app).iter().any(|a| a == id)
+        } else {
+            origin.starts_with("moz-extension://") || origin.starts_with("safari-extension://")
+        };
         if !ok {
-            return Err("أصل (Origin) غير مصرّح به".into());
+            return Err(
+                "أصل (Origin) غير مصرّح به — معرّف الإضافة غير مدرج في القائمة المسموحة، أضفه من إعدادات UltraDM".into(),
+            );
         }
     }
     let key = text
@@ -178,13 +203,8 @@ async fn handle_conn(app: AppHandle, mut stream: tokio::net::TcpStream) -> Resul
     stream.write_all(resp.as_bytes()).await.map_err(|e| e.to_string())?;
     stream.flush().await.map_err(|e| e.to_string())?;
 
-    // رسالة ترحيب تحمل الثيم الحالي (settings.json نص JSON خام).
-    let theme = super::settings::load_settings(app.clone())
-        .ok()
-        .flatten()
-        .and_then(|raw| serde_json::from_str::<serde_json::Value>(&raw).ok())
-        .and_then(|v| v.get("theme").and_then(|t| t.as_str()).map(String::from))
-        .unwrap_or_else(|| "glass-emerald-cyan".into());
+    // رسالة ترحيب تحمل الثيم الحالي (من الذاكرة المؤقتة، لا قراءة قرص لكل اتصال).
+    let theme = super::settings::cached_theme(&app);
     let hello = format!(
         "{{\"type\":\"theme\",\"id\":\"{theme}\"}}"
     );
@@ -441,8 +461,10 @@ pub fn extension_binding_status() -> ExtensionBindingStatus {
 
 /// كتابة مفاتيح Native Messaging لكل المتصفحات المثبتة (ويندوز).
 #[tauri::command]
-pub fn extension_register_browsers() -> Result<Vec<BrowserBinding>, String> {
-    let manifest = write_native_manifest()?;
+pub fn extension_register_browsers(
+    app: tauri::AppHandle,
+) -> Result<Vec<BrowserBinding>, String> {
+    let manifest = write_native_manifest(&app)?;
     #[cfg(target_os = "windows")]
     {
         use winreg::enums::HKEY_CURRENT_USER;
@@ -501,6 +523,31 @@ pub fn extension_register_browsers() -> Result<Vec<BrowserBinding>, String> {
 
 /// مسار ثابت خارج مجلد Temp: %LOCALAPPDATA%\UltraDM\native-host.json
 /// (مجلد Temp قد تُنظّفه ويندوز أو برامج التنظيف فيفقد المتصفح الملف).
+/// المعرّفات المسموحة: المعرّف الموثّق من متجر كروم ثابتًا، ثم أي
+/// معرّفات أضافها المستخدم في settings.json تحت المفتاح allowedExtensionIds.
+pub const KNOWN_EXTENSION_ID: &str = "kpjldkbninldcnhfjnbpbenejifihobc";
+
+#[must_use]
+pub fn allowed_extension_ids(app: &tauri::AppHandle) -> Vec<String> {
+    let mut ids = vec![KNOWN_EXTENSION_ID.to_owned()];
+    if let Some(extra) = super::settings::load_settings(app.clone())
+        .ok()
+        .flatten()
+        .and_then(|raw| serde_json::from_str::<serde_json::Value>(&raw).ok())
+        .and_then(|v| v.get("allowedExtensionIds").and_then(|x| x.as_array()).cloned())
+    {
+        for e in extra {
+            if let Some(s) = e.as_str() {
+                let s = s.trim().trim_end_matches('/');
+                if !s.is_empty() && !ids.iter().any(|a| a == s) {
+                    ids.push(s.to_owned());
+                }
+            }
+        }
+    }
+    ids
+}
+
 fn native_manifest_path() -> std::path::PathBuf {
     let base = std::env::var("LOCALAPPDATA").ok().map(std::path::PathBuf::from)
         .or_else(|| std::env::var("USERPROFILE").ok().map(|h| std::path::PathBuf::from(h).join("AppData").join("Local")))
@@ -509,16 +556,22 @@ fn native_manifest_path() -> std::path::PathBuf {
 }
 
 /// يكتب ملف manifest الـNative Messaging (مصدر الحقيقة لأوامر winreg).
-fn write_native_manifest() -> Result<std::path::PathBuf, String> {
+/// المسار يشير إلى البرنامج نفسه مع الوسيط `--native-host`: الوضع الذي
+/// يقرأ رسائل المتصفح (طول 4 بايت little-endian + JSON) عبر stdin/stdout —
+/// كان manifest يشير إلى الواجهة الرسومية التي تغلق فورًا فتموت القناة.
+fn write_native_manifest(app: &tauri::AppHandle) -> Result<std::path::PathBuf, String> {
     let exe = std::env::current_exe().map_err(|e| e.to_string())?;
+    let origins: Vec<String> = allowed_extension_ids(app)
+        .iter()
+        .map(|id| format!("chrome-extension://{id}/"))
+        .collect();
     let manifest = serde_json::json!({
         "name": NATIVE_HOST_NAME,
         "description": "UltraDM Native Messaging Bridge",
         "path": exe.display().to_string(),
+        "args": ["--native-host"],
         "type": "stdio",
-        "allowed_origins": [
-            "chrome-extension://kpjldkbninldcnhfjnbpbenejifihobc/",
-        ],
+        "allowed_origins": origins,
         // متصفحات Gecko (Firefox/Waterfox/LibreWolf/Zen) تتطلب allowed_extensions
         "allowed_extensions": ["ultradm@ml.ai"],
     });

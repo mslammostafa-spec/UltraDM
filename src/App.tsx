@@ -342,6 +342,12 @@ export default function App() {
 
   const deleteSel = () => {
     if (!inTrash) {
+      // تأكيد قبل حذف تحميلات نشطة: نقرة خاطئة قرب الاكتمال كانت تفقد التحميل
+      // فورًا بلا حوار (المؤجَّل/المتوقف/المنتهي لا يحتاج تأكيدًا).
+      const active = selectedRows.filter((d) => d.status === "downloading" || d.status === "queued");
+      if (active.length > 0 && !window.confirm(`إلغاء وحذف ${active.length} تحميل نشط؟ ستفقد التقدم المحفوظ.`)) {
+        return;
+      }
       if (!PREVIEW) selectedRows.forEach((d) => engineCancel(d.id).catch(() => {}));
       setDownloads((ds) => ds.filter((d) => !selected.has(d.id)));
       setDeleted((ds) => [...selectedRows, ...ds]);
