@@ -400,17 +400,17 @@ pub fn extension_binding_status() -> ExtensionBindingStatus {
     #[cfg(target_os = "windows")]
     {
         let browsers = [
-            ("Chrome", "HKCU\\Software\\Google\\Chrome\\NativeMessagingHosts"),
-            ("Edge", "HKCU\\Software\\Microsoft\\Edge\\NativeMessagingHosts"),
-            ("Brave", "HKCU\\Software\\BraveSoftware\\Brave\\NativeMessagingHosts"),
-            ("Opera", "HKCU\\Software\\Opera Software\\NativeMessagingHosts"),
-            ("Vivaldi", "HKCU\\Software\\Vivaldi\\NativeMessagingHosts"),
-            ("Chromium", "HKCU\\Software\\Chromium\\NativeMessagingHosts"),
-            ("Whale", "HKCU\\Software\\Naver\\Whale\\NativeMessagingHosts"),
-            ("Firefox", "HKCU\\Software\\Mozilla\\NativeMessagingHosts"),
-            ("Waterfox", "HKCU\\Software\\Waterfox\\NativeMessagingHosts"),
-            ("LibreWolf", "HKCU\\Software\\LibreWolf\\NativeMessagingHosts"),
-            ("Zen", "HKCU\\Software\\Zen\\NativeMessagingHosts"),
+            ("Chrome", r"Software\Google\Chrome\NativeMessagingHosts"),
+            ("Edge", r"Software\Microsoft\Edge\NativeMessagingHosts"),
+            ("Brave", r"Software\BraveSoftware\Brave\NativeMessagingHosts"),
+            ("Opera", r"Software\Opera Software\NativeMessagingHosts"),
+            ("Vivaldi", r"Software\Vivaldi\NativeMessagingHosts"),
+            ("Chromium", r"Software\Chromium\NativeMessagingHosts"),
+            ("Whale", r"Software\Naver\Whale\NativeMessagingHosts"),
+            ("Firefox", r"Software\Mozilla\NativeMessagingHosts"),
+            ("Waterfox", r"Software\Waterfox\NativeMessagingHosts"),
+            ("LibreWolf", r"Software\LibreWolf\NativeMessagingHosts"),
+            ("Zen", r"Software\Zen\NativeMessagingHosts"),
         ]
         .iter()
         .map(|(name, key)| BrowserBinding {
@@ -449,23 +449,46 @@ pub fn extension_register_browsers() -> Result<Vec<BrowserBinding>, String> {
         use winreg::RegKey;
         let hkcu = RegKey::predef(HKEY_CURRENT_USER);
         let browsers = [
-            ("Chrome", "Software\\Google\\Chrome\\NativeMessagingHosts"),
-            ("Edge", "Software\\Microsoft\\Edge\\NativeMessagingHosts"),
-            ("Brave", "Software\\BraveSoftware\\Brave\\NativeMessagingHosts"),
-            ("Opera", "Software\\Opera Software\\NativeMessagingHosts"),
-            ("Vivaldi", "Software\\Vivaldi\\NativeMessagingHosts"),
-            ("Chromium", "Software\\Chromium\\NativeMessagingHosts"),
-            ("Whale", "Software\\Naver\\Whale\\NativeMessagingHosts"),
-            ("Firefox", "Software\\Mozilla\\NativeMessagingHosts"),
-            ("Waterfox", "Software\\Waterfox\\NativeMessagingHosts"),
-            ("LibreWolf", "Software\\LibreWolf\\NativeMessagingHosts"),
-            ("Zen", "Software\\Zen\\NativeMessagingHosts"),
+            ("Chrome", r"Software\Google\Chrome\NativeMessagingHosts"),
+            ("Edge", r"Software\Microsoft\Edge\NativeMessagingHosts"),
+            ("Brave", r"Software\BraveSoftware\Brave\NativeMessagingHosts"),
+            ("Opera", r"Software\Opera Software\NativeMessagingHosts"),
+            ("Vivaldi", r"Software\Vivaldi\NativeMessagingHosts"),
+            ("Chromium", r"Software\Chromium\NativeMessagingHosts"),
+            ("Whale", r"Software\Naver\Whale\NativeMessagingHosts"),
+            ("Firefox", r"Software\Mozilla\NativeMessagingHosts"),
+            ("Waterfox", r"Software\Waterfox\NativeMessagingHosts"),
+            ("LibreWolf", r"Software\LibreWolf\NativeMessagingHosts"),
+            ("Zen", r"Software\Zen\NativeMessagingHosts"),
         ];
-        for (_, sub) in browsers {
-            let (k, _) = hkcu
-                .create_subkey(format!("{sub}\\{NATIVE_HOST_NAME}"))
-                .map_err(|e| e.to_string())?;
-            k.set_value("", &manifest.display().to_string()).map_err(|e| e.to_string())?;
+        // نسجّل في HKCU فقط (بلا صلاحيات مسؤول)، وكل متصفح على حدة:
+        // فشل متصفح واحد لا يُجهض بقية المتصفحات، ويُسجَّل الخطأ الحقيقي من النظام.
+        let mut errors: Vec<String> = Vec::new();
+        let mut registered = 0usize;
+        for (name, sub) in browsers {
+            match hkcu
+                .create_subkey(format!(r"{sub}\{NATIVE_HOST_NAME}"))
+                .and_then(|(k, _)| k.set_value("", &manifest.display().to_string())) {
+                Ok(_) => registered += 1,
+                Err(e) => {
+                    let win_err = std::io::Error::from(e);
+                    eprintln!(
+                        "ultradm: فشل تسجيل Native Host للمتصفح {name} في HKCU\\{sub}\\{NATIVE_HOST_NAME}: {win_err}"
+                    );
+                    errors.push(format!("{name}: {win_err}"));
+                }
+            }
+        }
+        if !errors.is_empty() {
+            eprintln!(
+                "ultradm: ملف الـmanifest في {} — أخطاء التسجيل: {}",
+                manifest.display(),
+                errors.join(" | ")
+            );
+            if registered == 0 {
+                // لا متصفح سُجِّل: أعد الخطأ الحقيقي ليظهر في الواجهة.
+                return Err(errors.join(" | "));
+            }
         }
         Ok(extension_binding_status().browsers)
     }
@@ -476,8 +499,13 @@ pub fn extension_register_browsers() -> Result<Vec<BrowserBinding>, String> {
     }
 }
 
+/// مسار ثابت خارج مجلد Temp: %LOCALAPPDATA%\UltraDM\native-host.json
+/// (مجلد Temp قد تُنظّفه ويندوز أو برامج التنظيف فيفقد المتصفح الملف).
 fn native_manifest_path() -> std::path::PathBuf {
-    std::env::temp_dir().join("ultradm-native-host.json")
+    let base = std::env::var("LOCALAPPDATA").ok().map(std::path::PathBuf::from)
+        .or_else(|| std::env::var("USERPROFILE").ok().map(|h| std::path::PathBuf::from(h).join("AppData").join("Local")))
+        .unwrap_or_else(std::env::temp_dir);
+    base.join("UltraDM").join("native-host.json")
 }
 
 /// يكتب ملف manifest الـNative Messaging (مصدر الحقيقة لأوامر winreg).
@@ -490,9 +518,14 @@ fn write_native_manifest() -> Result<std::path::PathBuf, String> {
         "type": "stdio",
         "allowed_origins": [
             "chrome-extension://kpjldkbninldcnhfjnbpbenejifihobc/",
-        ]
+        ],
+        // متصفحات Gecko (Firefox/Waterfox/LibreWolf/Zen) تتطلب allowed_extensions
+        "allowed_extensions": ["ultradm@ml.ai"],
     });
     let path = native_manifest_path();
+    if let Some(dir) = path.parent() {
+        std::fs::create_dir_all(dir).map_err(|e| format!("تعذّر إنشاء مجلد manifest ({}): {e}", dir.display()))?;
+    }
     let mut f = std::fs::File::create(&path).map_err(|e| e.to_string())?;
     f.write_all(serde_json::to_string_pretty(&manifest).map_err(|e| e.to_string())?.as_bytes())
         .map_err(|e| e.to_string())?;
@@ -588,10 +621,15 @@ fn browser_installed(browser: &str) -> bool {
 
     // آخر ملجأ: App Paths في السجل (HKCU ثم HKLM).
     let exe = match browser {
-        "Chrome" => "chrome.exe",
+        "Chrome" | "Chromium" | "Whale" => "chrome.exe",
         "Edge" => "msedge.exe",
         "Brave" => "brave.exe",
-        _ => "opera.exe",
+        "Vivaldi" => "vivaldi.exe",
+        "Opera" => "opera.exe",
+        "Firefox" | "Zen" => "firefox.exe",
+        "Waterfox" => "waterfox.exe",
+        "LibreWolf" => "librewolf.exe",
+        _ => "chrome.exe",
     };
     use winreg::enums::{HKEY_CURRENT_USER, HKEY_LOCAL_MACHINE};
     use winreg::RegKey;
