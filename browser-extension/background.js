@@ -258,7 +258,9 @@ async function handleCapture(m) {
 
 chrome.runtime.onMessage.addListener((m, _sender, sendResponse) => {
   if (m.type === "capture") {
-    handleCapture(m).then(sendResponse);
+    handleCapture(m)
+      .then(sendResponse)
+      .catch(() => sendResponse({ ok: false }));
     return true; // استجابة غير متزامنة
   }
   if (m.type === "ultradm://get-state") {
@@ -277,10 +279,24 @@ chrome.runtime.onMessage.addListener((m, _sender, sendResponse) => {
   if (m.type === "ultradm://probe-url") {
     // من البوب-أب: احصل على وسائط التبويب الحالي من السكربتات ثم أرسلها.
     chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
-      const t = tabs[0];
-      if (t) chrome.tabs.sendMessage(t.id, { type: "ultradm://list-media" }, (r) => {
-        sendResponse(r || { media: [] });
-      });
+      const t = tabs && tabs[0];
+      if (!t) {
+        sendResponse({ media: [] });
+        return;
+      }
+      // شكل الردود القديم (callback): يجب فحص chrome.runtime.lastError
+      // وإلا ظهر "Unchecked runtime.lastError" حين لا يوجد مستقبل في التبويب.
+      try {
+        chrome.tabs.sendMessage(t.id, { type: "ultradm://list-media" }, (r) => {
+          if (chrome.runtime.lastError) {
+            sendResponse({ media: [] });
+            return;
+          }
+          sendResponse(r || { media: [] });
+        });
+      } catch {
+        sendResponse({ media: [] });
+      }
     });
     return true;
   }
