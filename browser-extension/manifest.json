@@ -3,7 +3,7 @@
   "name": "UltraDM Downloader",
   "short_name": "UltraDM",
   "description": "يصطاد روابط التحميل والبث (MP4/M3U8/MPD/Magnet) ويرسلها إلى برنامج UltraDM فورًا مع الـCookies والـUser-Agent.",
-  "version": "1.1.5",
+  "version": "1.1.6",
   "icons": {
     "16": "icons/icon16.png",
     "48": "icons/icon48.png",

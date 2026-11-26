@@ -99,8 +99,18 @@
     } else if (fmt.id && fmt.id !== "best") {
       msg.format_id = fmt.id;
     }
-    const res = await wsSend(msg, 15000);
-    return !!(res && res.type === "download-started");
+    // القناة الأساسية: WebSocket المباشر. البديل: رسالة ULTRADM_DOWNLOAD إلى
+    // الـService Worker (وهو الذي يعرف حالة الاتصال ويعيد المحاولة بصمت).
+    try {
+      const res = await wsSend(msg, 15000);
+      if (res && res.type === "download-started") return true;
+    } catch { /* جرّب القناة البديلة */ }
+    try {
+      const res = await chrome.runtime.sendMessage({ type: "ULTRADM_DOWNLOAD", ...msg });
+      return !!(res && res.ok);
+    } catch {
+      return false;
+    }
   }
 
   // ——— القائمة الزجاجية المنسدلة ———
@@ -299,6 +309,11 @@
     document.documentElement.appendChild(cap);
     // موضع ديناميكي: داخل حدود المشغل الحالية، الزاوية العلوية اليسرى.
     const place = () => {
+      // أخفِها في التبويبات غير المرئية أو حين يكون المشغل صغيرًا جدًا.
+      if (document.hidden) {
+        cap.style.display = "none";
+        return;
+      }
       const r = player.getBoundingClientRect();
       if (r.width < 80 || r.bottom < 0 || r.top > innerHeight) {
         cap.style.display = "none";
@@ -311,6 +326,7 @@
     place();
     addEventListener("resize", place, { passive: true });
     addEventListener("scroll", place, { passive: true, capture: true });
+    document.addEventListener("visibilitychange", place, { passive: true });
     // تحديث الموضع مع تغيّر حجم المشغل (ملء الشاشة، تكبير/تصغير) وتنقل يوتيوب.
     if (typeof ResizeObserver !== "undefined") {
       new ResizeObserver(place).observe(player);

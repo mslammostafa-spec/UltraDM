@@ -1,7 +1,7 @@
 import { useState } from "react";
 import {
   Link2, Magnet, Pause, Play, Trash2, CalendarClock, Moon, Sun, Undo2,
-  Settings, Minus, Square, X, Copy, RefreshCw, Info,
+  Settings, X, RefreshCw, Info,
 } from "lucide-react";
 import { inDesktop } from "../lib/ipc";
 import { checkForUpdates, type UpdateStatus } from "../lib/updater";
@@ -37,32 +37,23 @@ export function ToolbarButton({
   );
 }
 
-function WindowControls({ maximized, onMax }: { maximized: boolean; onMax: () => void }) {
-  const btn = "w-11 h-11 grid place-items-center cursor-pointer transition-colors duration-150";
-  const click = (fn: () => void) => (e: React.MouseEvent) => {
-    e.stopPropagation();
-    fn();
-  };
-  const api = async () => {
-    const { getCurrentWindow } = await import("@tauri-apps/api/window");
-    return getCurrentWindow();
-  };
+function XHideButton() {
   return (
-    <div className="flex items-center h-full" style={{ color: "var(--muted)" }}>
-      <button className={btn} aria-label="تصغير" title="تصغير" onClick={click(() => api().then((w) => w.minimize()))}>
-        <Minus size={15} />
-      </button>
-      <button className={btn} aria-label={maximized ? "استعادة" : "تكبير"} title={maximized ? "استعادة" : "تكبير"} onClick={click(onMax)}>
-        {maximized ? <Copy size={13} /> : <Square size={12} />}
-      </button>
-      <button
-        className={`${btn} hover:!bg-[#e5484d] hover:!text-white`}
-        aria-label="إغلاق" title="إغلاق"
-        onClick={click(() => api().then((w) => w.close()))}
-      >
-        <X size={16} />
-      </button>
-    </div>
+    <button
+      className="w-11 h-11 grid place-items-center cursor-pointer transition-colors duration-150 hover:!bg-[#e5484d] hover:!text-white pointer-events-auto"
+      style={{ color: "var(--muted)" }}
+      aria-label="إخفاء إلى شريط المهام" title="إخفاء إلى شريط المهام"
+      onMouseDown={(e) => e.stopPropagation()}
+      onDoubleClick={(e) => e.stopPropagation()}
+      onClick={async () => {
+        try {
+          const { getCurrentWindow } = await import("@tauri-apps/api/window");
+          await getCurrentWindow().hide();
+        } catch { /* غير مكتبي */ }
+      }}
+    >
+      <X size={16} />
+    </button>
   );
 }
 
@@ -86,7 +77,6 @@ export default function Toolbar({
   onAbout: (status: UpdateStatus | null) => void;
 }) {
   const [pulse, setPulse] = useState("");
-  const [maximized, setMaximized] = useState(false);
   const flash = (k: string) => {
     setPulse(k);
     setTimeout(() => setPulse(""), 300);
@@ -97,16 +87,22 @@ export default function Toolbar({
     const { getCurrentWindow } = await import("@tauri-apps/api/window");
     const w = getCurrentWindow();
     await w.toggleMaximize();
-    setMaximized(await w.isMaximized());
+    void w.isMaximized();
   };
 
   return (
     <header
       data-tauri-drag-region
       onDoubleClick={() => { if (desktop) apiMax(); }}
-      className="flex items-center gap-2 px-4 h-16 border-b shrink-0 select-none"
+      className="relative z-50 flex items-center gap-2 px-4 h-16 border-b shrink-0 select-none pointer-events-auto"
       style={{ background: "var(--surface)", borderColor: "var(--border)" }}
     >
+      {/* زر X: أول عنصر في RTL فيلتصق بأقصى الزاوية اليمنى فعلياً؛ يخفي النافذة. */}
+      {desktop && (
+        <div className="absolute top-0 right-0 z-[60] h-full flex items-stretch pointer-events-auto">
+          <XHideButton />
+        </div>
+      )}
       {/* منطقة الأزرار: مستثناة تماماً من السحب — كل نقرة تعمل ولا تُكبّر النافذة. */}
       <div
         className="flex items-center gap-2 h-full"
@@ -170,11 +166,6 @@ export default function Toolbar({
       <ToolbarButton label="الإعدادات والمظهر" onClick={onOpenSettings}>
         <Settings size={17} />
       </ToolbarButton>
-      {desktop && (
-        <div className="ms-auto self-stretch flex items-stretch" style={{ marginInlineStart: "auto" }}>
-          <WindowControls maximized={maximized} onMax={() => apiMax()} />
-        </div>
-      )}
       </div>
     </header>
   );

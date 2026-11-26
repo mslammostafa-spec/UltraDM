@@ -188,9 +188,13 @@ export async function registerTorrentHandler(): Promise<void> {
   await invoke("register_torrent_handler");
 }
 
-export type PowerAction = "shutdown" | "sleep";
+export type PowerAction = "shutdown" | "sleep" | "quit";
 
 export async function requestPower(action: PowerAction): Promise<void> {
+  if (action === "quit") {
+    await invoke("exit_app");
+    return;
+  }
   await invoke(action === "shutdown" ? "shutdown_device" : "sleep_device");
 }
 

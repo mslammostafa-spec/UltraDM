@@ -104,16 +104,37 @@ async fn handle_conn(app: AppHandle, mut stream: tokio::net::TcpStream) -> Resul
             return Err("ترويسة كبيرة جدًا".into());
         }
     }
-    let text = String::from_utf8_lossy(&buf);
+    let text = String::from_utf8_lossy(&buf).to_string();
     // فحص صحة خفيف للإضافة: GET /health يجيب 200 بدون مصافحة WebSocket.
     if text.starts_with("GET /health") {
         let body = "{\"ok\":true,\"app\":\"ultradm\"}";
         let resp = format!(
-            "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+            "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nAccess-Control-Allow-Origin: *\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
             body.len(),
             body
         );
         let _ = stream.write_all(resp.as_bytes()).await;
+        return Ok(());
+    }
+    // POST /add: إضافة تحميل من أي صفحة (CORS مفتوح) — يجيب 204 ويفتح
+    // نافذة "معلومات التحميل" في التطبيق بالرابط المُرسل.
+    if text.starts_with("POST /add") {
+        let url = text
+            .split("\r\n\r\n")
+            .nth(1)
+            .unwrap_or("")
+            .trim()
+            .to_string();
+        let resp = "HTTP/1.1 204 No Content\r\nAccess-Control-Allow-Origin: *\r\nAccess-Control-Allow-Methods: POST, OPTIONS\r\nAccess-Control-Allow-Headers: Content-Type\r\nConnection: close\r\n\r\n";
+        let _ = stream.write_all(resp.as_bytes()).await;
+        if !url.is_empty() && url.len() < 8192 {
+            let app2 = app.clone();
+            let url2 = url.clone();
+            tokio::spawn(async move {
+                use tauri::Emitter;
+                let _ = app2.emit("extension://capture", serde_json::json!({ "url": url2, "kind": "direct" }));
+            });
+        }
         return Ok(());
     }
     if !text.starts_with("GET /ultradm") {

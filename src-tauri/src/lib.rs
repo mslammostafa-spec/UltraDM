@@ -66,7 +66,9 @@ fn sleep_device() -> Result<(), String> {
 
 #[tauri::command]
 fn exit_app(app: tauri::AppHandle) {
+    // إنهاء قاطع ومضمون: يوقف المهام ويغلق العملية حتى لو علّق شيءًا.
     app.exit(0);
+    std::process::exit(0);
 }
 
 /// فتح مجلد الملف المحفوظ في مدير ملفات النظام (وتحديد الملف على ويندوز).

@@ -131,7 +131,7 @@ async function connectWs() {
     setStatus("online");
     // اطلب الثيم الحالي من البرنامج ومرّر الإعدادات (فقط عندما تكون القناة OPEN فعلًا).
     if (socket.readyState === WebSocket.OPEN) {
-      socket.send(JSON.stringify({ type: "hello", extension: "ultradm", version: "1.1.5" }));
+      socket.send(JSON.stringify({ type: "hello", extension: "ultradm", version: "1.1.6" }));
     }
   };
   ws.onmessage = (ev) => {
@@ -284,6 +284,17 @@ chrome.contextMenus.onClicked.addListener((info, _tab) => {
     userAgent: "",
     source: "context-menu",
   }).catch(() => {});
+});
+
+// بديل موثوق لقناة الصفحة: يمرر طلب تحميل من content script عبر WS أو Native.
+chrome.runtime.onMessage.addListener((m, _s, respond) => {
+  if (m && m.type === "ULTRADM_DOWNLOAD") {
+    wsSend({ type: "download", url: m.url, format_id: m.format_id, audio_only: m.audio_only, audio_format: m.audio_format }, 15000)
+      .then((res) => respond({ ok: !!(res && res.type === "download-started") }))
+      .catch(() => respond({ ok: false }));
+    return true; // استجابة غير متزامنة
+  }
+  return false;
 });
 
 // ==== الالتقاط التلقائي الوحيد: تنزيل حقيقي بدأه المستخدم في المتصفح ====

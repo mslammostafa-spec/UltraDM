@@ -61,6 +61,12 @@ body {
   user-select: none;
 }
 
+/* طبقات التوهج الزجاجي الزخرفية لا تعترض النقرات أبدًا */
+body::before,
+body::after {
+  pointer-events: none;
+}
+
 * {
   scrollbar-width: thin;
   scrollbar-color: var(--border) transparent;
