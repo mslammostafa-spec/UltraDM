@@ -70,6 +70,10 @@ export async function mediaDownload(req: MediaRequest): Promise<string> {
   return await invoke("media_download", { req });
 }
 
+export async function mediaInstallTools(): Promise<void> {
+  return await invoke("media_install_tools");
+}
+
 export async function mediaCancel(id: string): Promise<void> {
   if (isTauri()) await invoke("media_cancel", { id }).catch(() => {});
 }

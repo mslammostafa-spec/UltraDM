@@ -420,6 +420,96 @@ pub fn media_cancel(state: State<'_, MediaHandle>, id: String) {
     }
 }
 
+// ——— تثبيت الأدوات: تنزيل yt-dlp و FFmpeg إلى مجلد bin الرسمي ———
+
+/// تنزيل ملف مع تقرير تقدم عبر حدث.
+async fn download_to(url: &str, dest: &std::path::Path, app: &AppHandle, step: &str) -> Result<(), String> {
+    let resp = reqwest::get(url)
+        .await
+        .map_err(|e| format!("تنزيل {step}: {e}"))?
+        .error_for_status()
+        .map_err(|e| format!("تنزيل {step}: {e}"))?;
+    let total = resp.content_length().unwrap_or(0);
+    let mut file = tokio::fs::File::create(dest).await.map_err(|e| e.to_string())?;
+    use tokio::io::AsyncWriteExt;
+    let mut stream = resp.bytes_stream();
+    use futures_util::StreamExt;
+    let mut received: u64 = 0;
+    while let Some(chunk) = stream.next().await {
+        let chunk = chunk.map_err(|e| format!("تنزيل {step}: {e}"))?;
+        file.write_all(&chunk).await.map_err(|e| e.to_string())?;
+        received += chunk.len() as u64;
+        if total > 0 {
+            let pct = (received as f64 / total as f64 * 100.0).min(100.0);
+            let _ = app.emit("media://tools-progress", serde_json::json!({ "step": step, "percent": pct }));
+        }
+    }
+    file.flush().await.map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+/// تثبيت yt-dlp و FFmpeg في %LOCALAPPDATA%\UltraDM\bin (ويندوز) أو
+/// ~/.local/share/UltraDM/bin. yt-dlp ملف تنفيذي واحد، وFFmpeg حزمة
+/// zip تُفكّ بـ PowerShell ثم يُؤخذ ffmpeg.exe و ffprobe.exe فقط.
+#[tauri::command]
+pub async fn media_install_tools(app: AppHandle) -> Result<(), String> {
+    let bin = tools_bin_dir().ok_or("تعذّر تحديد مجلد الأدوات")?;
+    tokio::fs::create_dir_all(&bin).await.map_err(|e| e.to_string())?;
+
+    // 1) yt-dlp: ملف exe واحد من إصدارات GitHub الرسمية.
+    let ytdlp_url = "https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp.exe";
+    let ytdlp_dest = bin.join("yt-dlp.exe");
+    download_to(ytdlp_url, &ytdlp_dest, &app, "yt-dlp").await?;
+
+    // 2) FFmpeg: حزمة essentials من Gyan (GitHub) ثم فكّ وفصل الملفين.
+    let ffmpeg_zip = bin.join("ffmpeg.zip");
+    let ffmpeg_url = "https://github.com/GyanD/codexffmpeg/releases/download/7.1/ffmpeg-7.1-essentials_build.zip";
+    download_to(ffmpeg_url, &ffmpeg_zip, &app, "ffmpeg").await?;
+    let _ = app.emit("media://tools-progress", serde_json::json!({ "step": "ffmpeg-extract", "percent": 0 }));
+    let out = tokio::process::Command::new("powershell")
+        .args([
+            "-NoProfile",
+            "-Command",
+            &format!(
+                "$ErrorActionPreference='Stop'; Expand-Archive -Force -Path '{}' -DestinationPath '{}'",
+                ffmpeg_zip.display(),
+                bin.join("ffmpeg-x").display()
+            ),
+        ])
+        .output()
+        .await
+        .map_err(|e| format!("فكّ FFmpeg: {e}"))?;
+    if !out.status.success() {
+        return Err(format!(
+            "فكّ FFmpeg: {}",
+            String::from_utf8_lossy(&out.stderr).trim()
+        ));
+    }
+    // انقل ffmpeg.exe و ffprobe.exe من المجلد المفكوك (داخل bin/…) إلى bin.
+    let find = tokio::process::Command::new("powershell")
+        .args([
+            "-NoProfile",
+            "-Command",
+            &format!(
+                "Get-ChildItem -Recurse -Filter 'ffmpeg.exe' -Path '{}' | Select-Object -First 1 -ExpandProperty FullName; Get-ChildItem -Recurse -Filter 'ffprobe.exe' -Path '{}' | Select-Object -First 1 -ExpandProperty FullName",
+                bin.join("ffmpeg-x").display(),
+                bin.join("ffmpeg-x").display()
+            ),
+        ])
+        .output()
+        .await
+        .map_err(|e| format!("بحث FFmpeg: {e}"))?;
+    let found = String::from_utf8_lossy(&find.stdout);
+    for (i, src) in found.lines().filter(|l| l.ends_with(".exe")).take(2).enumerate() {
+        let name = if i == 0 { "ffmpeg.exe" } else { "ffprobe.exe" };
+        let _ = tokio::fs::copy(src, bin.join(name)).await;
+    }
+    let _ = tokio::fs::remove_dir_all(bin.join("ffmpeg-x")).await;
+    let _ = tokio::fs::remove_file(&ffmpeg_zip).await;
+    let _ = app.emit("media://tools-progress", serde_json::json!({ "step": "done", "percent": 100 }));
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

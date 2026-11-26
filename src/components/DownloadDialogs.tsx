@@ -4,7 +4,7 @@ import {
   CheckCircle2, Pause, Play, XCircle, ChevronDown, ChevronUp, HardDrive, FileClock, Activity,
 } from "lucide-react";
 import { Category, Download } from "../lib/ipc";
-import { mediaCheck, mediaProbe, mediaDownload, type MediaInfo, type MediaFormat } from "../lib/media";
+import { mediaCheck, mediaProbe, mediaDownload, mediaInstallTools, type MediaInfo, type MediaFormat } from "../lib/media";
 import { CATEGORY_LABEL, categoryFromName, fileNameFromUrl, formatBytes, formatEta, formatSpeed, previewSizeFor } from "../lib/format";
 import { Modal, ThreadsPicker } from "./Dialogs";
 
@@ -61,6 +61,39 @@ export function DownloadInfoDialog({
   const [media, setMedia] = useState<MediaInfo | null>(null);
   const [probing, setProbing] = useState(false);
   const [probeErr, setProbeErr] = useState<string | null>(null);
+  const [installing, setInstalling] = useState(false);
+
+  const installTools = async () => {
+    setInstalling(true);
+    setProbeErr("جارٍ تنزيل الأدوات… قد يستغرق دقيقة حسب سرعة الاتصال");
+    try {
+      await mediaInstallTools();
+      const t = await mediaCheck();
+      setTools(t);
+      setProbeErr(null);
+    } catch (e) {
+      setProbeErr("تعذّر تثبيت الأدوات: " + (e instanceof Error ? e.message : String(e)));
+    } finally {
+      setInstalling(false);
+    }
+  };
+
+  const probe = async () => {
+    setProbing(true);
+    setProbeErr(null);
+    try {
+      const t = await mediaCheck();
+      setTools(t);
+      if (!t.ytdlp) throw new Error("yt-dlp غير مثبَّت");
+      const info = await mediaProbe(url.trim());
+      setMedia(info);
+      setShowMedia(true);
+    } catch (e) {
+      setProbeErr(e instanceof Error ? e.message : String(e));
+    } finally {
+      setProbing(false);
+    }
+  };
   const [tools, setTools] = useState<{ ytdlp: boolean; ffmpeg: boolean } | null>(null);
   const [fmt, setFmt] = useState<string>("best");
   // قائمة جودة سريعة (يوتيوب/فيديو) قبل التحليل — تُمرَّر فعليًا إلى yt-dlp.
@@ -86,23 +119,6 @@ export function DownloadInfoDialog({
     const u = url.trim().toLowerCase();
     return /youtube|youtu\.be|tiktok|instagram|facebook|fb\.watch|twitter|x\.com|twitch|vimeo|dailymotion|soundcloud|reddit|\.m3u8|\.mpd|live|video|watch/.test(u);
   }, [url]);
-
-  const probe = async () => {
-    setProbing(true);
-    setProbeErr(null);
-    try {
-      const t = await mediaCheck();
-      setTools(t);
-      if (!t.ytdlp) throw new Error("yt-dlp غير مثبَّت — ثبّته ثم أعد المحاولة");
-      const info = await mediaProbe(url.trim());
-      setMedia(info);
-      setShowMedia(true);
-    } catch (e) {
-      setProbeErr(e instanceof Error ? e.message : String(e));
-    } finally {
-      setProbing(false);
-    }
-  };
 
   const startMedia = async () => {
     try {
@@ -230,6 +246,12 @@ export function DownloadInfoDialog({
           </button>
 
           {probeErr && <p className="text-[12px] mt-2" style={{ color: "var(--torrent)" }}>{probeErr}</p>}
+          {probeErr && !installing && (
+            <button onClick={installTools} disabled={installing}
+                    className="mt-2 text-[12px] underline cursor-pointer" style={{ color: "var(--color-accent)" }}>
+              تثبيت الأدوات تلقائيًا (yt-dlp و FFmpeg)
+            </button>
+          )}
 
           {media && showMedia && (
             <div className="mt-3 space-y-3">

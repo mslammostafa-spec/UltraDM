@@ -428,6 +428,7 @@ pub fn run() {
             register::register_autostart,
             download::engine_set_cache_config,
             media::media_check,
+            media::media_install_tools,
             media::media_probe,
             media::media_download,
             media::media_cancel,
