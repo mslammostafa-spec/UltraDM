@@ -41,7 +41,7 @@ mod tests {
         // بدون AppHandle لا يمكن استدعاء save_settings مباشرة؛ نتحقق من صحة التحقق
         let bad = "{not json";
         assert!(serde_json::from_str::<serde_json::Value>(bad).is_err());
-        let good = r#"{"theme":"matrix-hacker"}"#;
+        let good = r#"{"theme":"glass-emerald-cyan"}"#;
         assert!(serde_json::from_str::<serde_json::Value>(good).is_ok());
     }
 }

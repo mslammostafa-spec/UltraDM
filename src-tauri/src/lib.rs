@@ -97,6 +97,15 @@ fn lower_process_priority() {}
 pub fn run() {
     let silent = std::env::args().any(|a| a == "--ultradm-silent");
     tauri::Builder::default()
+        // نسخة واحدة فقط: أي تشغيل ثانٍ (أو رابط من المتصفح) يعيد النافذة
+        // المفتوحة إلى المقدمة بدل فتح نسخة جديدة بأيقونة ثانية في شريط المهام.
+        .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
+            if let Some(w) = app.get_webview_window("main") {
+                let _ = w.show();
+                let _ = w.unminimize();
+                let _ = w.set_focus();
+            }
+        }))
         .plugin(tauri_plugin_autostart::init(
             tauri_plugin_autostart::MacosLauncher::LaunchAgent,
             Some(vec!["--ultradm-silent"]),

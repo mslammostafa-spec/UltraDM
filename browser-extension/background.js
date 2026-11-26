@@ -14,7 +14,7 @@ let wsReady = false;
 let reconnectTimer = null;
 let nativeFallback = false;
 let status = "connecting"; // connecting | online | offline
-let theme = { id: "cyber-glass-blue", accent: "#3b82f6", glow: "#8b5cf6" };
+let theme = { id: "glass-emerald-cyan", accent: "#34d399", glow: "#22d3ee" };
 let enabled = true;
 
 function setStatus(s) {
@@ -77,7 +77,7 @@ function sendNative(payload) {
 
 function applyTheme(t) {
   if (!t || !t.id) return;
-  const acc = S.THEME_ACCENTS[t.id] || S.THEME_ACCENTS["cyber-glass-blue"];
+  const acc = S.THEME_ACCENTS[t.id] || S.THEME_ACCENTS["glass-emerald-cyan"];
   theme = {
     id: t.id,
     accent: acc.accent,

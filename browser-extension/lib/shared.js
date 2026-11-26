@@ -9,16 +9,12 @@
 
     // ثيمات UltraDM: نفس معرّفات src/lib/themes.ts — يستخدمها الزر العائم.
     THEME_ACCENTS: {
-      "cyber-glass-blue": { accent: "#3b82f6", glow: "#8b5cf6" },
-      "obsidian-gold-crimson": { accent: "#d4af37", glow: "#dc2643" },
-      "emerald-luxury": { accent: "#10b981", glow: "#d4af37" },
-      "pure-frost-light": { accent: "#0284c7", glow: "#22d3ee" },
-      "neon-cyberpunk": { accent: "#e935ff", glow: "#22d3ee" },
-      "arctic-nord": { accent: "#88c0d0", glow: "#5e81ac" },
-      "sunset-synthwave": { accent: "#fb7185", glow: "#fbbf24" },
-      "midnight-royal": { accent: "#818cf8", glow: "#c0caf5" },
-      "matrix-hacker": { accent: "#22ff88", glow: "#00ff41" },
-      "minimalist-graphite": { accent: "#64748b", glow: "#94a3b8" },
+      "glass-emerald-cyan": { accent: "#34d399", glow: "#22d3ee" },
+      "glass-teal-lagoon": { accent: "#2dd4bf", glow: "#67e8f9" },
+      "glass-violet-crystal": { accent: "#a855f7", glow: "#d8b4fe" },
+      "glass-smoky-silver": { accent: "#c0c8d4", glow: "#8ab4f8" },
+      "glass-rose-blush": { accent: "#f43f5e", glow: "#fbcfe8" },
+      "glass-amber-ember": { accent: "#f59e0b", glow: "#fcd34d" },
     },
 
     FILE_EXT_RE:

@@ -1,6 +1,6 @@
 [package]
 name = "ultradm"
-version = "1.0.8"
+version = "1.0.9"
 description = "UltraDM — Ultra Download Manager"
 authors = ["UltraDM"]
 edition = "2021"
@@ -31,6 +31,7 @@ hex = "0.4"
 tauri-plugin-autostart = "2"
 tauri-plugin-updater = "2"
 tauri-plugin-process = "2"
+tauri-plugin-single-instance = "2"
 windows-sys = { version = "0.59", features = ["Win32_System_Threading"] }
 
 [target.'cfg(windows)'.dependencies]

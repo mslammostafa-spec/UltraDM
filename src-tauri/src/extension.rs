@@ -146,52 +146,141 @@ async fn handle_conn(app: AppHandle, mut stream: tokio::net::TcpStream) -> Resul
         .flatten()
         .and_then(|raw| serde_json::from_str::<serde_json::Value>(&raw).ok())
         .and_then(|v| v.get("theme").and_then(|t| t.as_str()).map(String::from))
-        .unwrap_or_else(|| "cyber-glass-blue".into());
+        .unwrap_or_else(|| "glass-emerald-cyan".into());
     let hello = format!(
         "{{\"type\":\"theme\",\"id\":\"{theme}\"}}"
     );
     write_ws_frame(&mut stream, hello.as_bytes()).await?;
 
     // ثم قراءة الرسائل (إطارات نصية مقنّعة من العميل)
-    let mut frames = Vec::new();
     loop {
         let msg = match read_ws_frame(&mut stream).await {
             Ok(m) => m,
             Err(_) => break,
         };
-        let ok = handle_message(&app, &msg).await;
-        frames.push(msg);
-        let _ = ok;
-        // ردّ تأكيد خفيف
-        let ack = format!("{{\"type\":\"captured\"}}");
-        let _ = write_ws_frame(&mut stream, ack.as_bytes()).await;
+        // probe يعيد قائمة الجودات، وdownload يعيد معرّف التحميل،
+        // وغيرهما يحصل على التأكيد الافتراضي.
+        match handle_message(&app, &msg).await {
+            Some(reply) => {
+                let _ = write_ws_frame(&mut stream, reply.as_bytes()).await;
+            }
+            None => {
+                let _ = write_ws_frame(&mut stream, b"{\"type\":\"captured\"}").await;
+            }
+        }
     }
     Ok(())
 }
 
-async fn handle_message(app: &AppHandle, raw: &str) -> bool {
-    let req: CaptureRequest = match serde_json::from_str(raw) {
-        Ok(r) => r,
-        Err(_) => return false,
-    };
-    if req.msg_type != "capture" {
-        return false;
-    }
-    // افتح نافذة "معلومات التحميل" مباشرة عبر حدث تلتقطه الواجهة.
-    CAPTURES_SENT.fetch_add(1, Ordering::SeqCst);
-    let _ = app.emit("extension://capture", &req);
-    // عند الإقلاع الصامت: أول رابط ملتقط يُظهر النافذة فورًا (إقلاع مؤجَّل).
+/// إظهار النافذة المفتوحة وجلبها للمقدمة (تُستخدم للنسخة الواحدة وللالتقاط).
+fn show_main(app: &AppHandle) {
     if let Some(w) = app.get_webview_window("main") {
-        if !w.is_visible().unwrap_or(true) {
-            let _: Result<(), tauri::Error> = (|| {
-                w.show()?;
-                w.unminimize()?;
-                w.set_focus()
-            })();
-        }
+        let _: Result<(), tauri::Error> = (|| {
+            w.show()?;
+            w.unminimize()?;
+            w.set_focus()
+        })();
     }
-    // نفّذ الالتقاط فورًا كرابط جاهز في قائمة التحميلات عبر محرك التحميل.
-    true
+}
+
+async fn handle_message(app: &AppHandle, raw: &str) -> Option<String> {
+    let v: serde_json::Value = serde_json::from_str(raw).ok()?;
+    match v.get("type")?.as_str()? {
+        "capture" => {
+            let req: CaptureRequest = serde_json::from_value(v).ok()?;
+            // افتح نافذة "معلومات التحميل" مباشرة عبر حدث تلتقطه الواجهة.
+            CAPTURES_SENT.fetch_add(1, Ordering::SeqCst);
+            let _ = app.emit("extension://capture", &req);
+            show_main(app);
+            Some("{\"type\":\"captured\"}".into())
+        }
+        // طلب قائمة الجودات للزر العائم في الإضافة (yt-dlp).
+        "probe" => {
+            let url = v.get("url")?.as_str()?.to_string();
+            let info = super::media::media_probe(url).await.ok()?;
+            Some(probe_reply(&info).to_string())
+        }
+        // بدء تحميل جودة محددة اختارها المستخدم من القائمة.
+        "download" => {
+            let url = v.get("url")?.as_str()?.to_string();
+            let format_id = v.get("format_id").and_then(|x| x.as_str()).map(String::from);
+            let audio_only = v.get("audio_only").and_then(|x| x.as_bool()).unwrap_or(false);
+            let audio_format = v.get("audio_format").and_then(|x| x.as_str()).map(String::from);
+            let container = v.get("container").and_then(|x| x.as_str()).map(String::from);
+            let req = super::media::MediaRequest {
+                url,
+                output_dir: download_dir(app),
+                format_id: if audio_only { None } else { format_id },
+                container,
+                audio_only,
+                audio_format,
+                audio_bitrate: Some("320K".into()),
+                audio_langs: None,
+                subs_langs: None,
+                subs_auto: false,
+                subs_mode: Some("none".into()),
+            };
+            let state = app.state::<super::media::MediaHandle>();
+            let id = super::media::media_download(app.clone(), state, req).await.ok()?;
+            show_main(app);
+            Some(format!("{{\"type\":\"download-started\",\"id\":\"{id}\"}}"))
+        }
+        _ => None,
+    }
+}
+
+/// مجلد التنزيلات الافتراضي لبدء التحميل من الإضافة مباشرة.
+fn download_dir(app: &AppHandle) -> String {
+    app.path()
+        .download_dir()
+        .map(|p| p.to_string_lossy().into_owned())
+        .unwrap_or_else(|_| std::env::temp_dir().to_string_lossy().into_owned())
+}
+
+/// تبسيط قائمة الجودات للإضافة: أفضل جودة، جودات فيديو بلا تكرار للارتفاع، وصوت فقط (MP3/M4A).
+fn probe_reply(info: &super::media::MediaInfo) -> serde_json::Value {
+    use serde_json::json;
+    let mut items = vec![json!({
+        "id": "best", "label": "أفضل جودة متاحة", "ext": "mp4",
+        "height": serde_json::Value::Null, "size": serde_json::Value::Null,
+        "audioOnly": false, "audioFormat": serde_json::Value::Null,
+    })];
+    let mut seen: std::collections::HashSet<u32> = Default::default();
+    // من الأعلى للأدنى، ونفضّل mp4 لكل ارتفاع.
+    let mut video: Vec<&super::media::MediaFormat> = info
+        .formats
+        .iter()
+        .filter(|f| f.height.is_some())
+        .collect();
+    video.sort_by(|a, b| b.height.unwrap().cmp(&a.height.unwrap()));
+    for f in video {
+        let h = f.height.unwrap();
+        if !seen.insert(h) {
+            continue;
+        }
+        let mp4 = f.ext.eq_ignore_ascii_case("mp4");
+        if seen.len() > 1 && !mp4 {
+            // ارتفاع جديد بصيغة غير mp4: اقبله (الجودة أهم من الحاوية هنا)
+        }
+        items.push(json!({
+            "id": f.format_id, "label": f.label, "ext": f.ext,
+            "height": h, "size": f.size, "audioOnly": false,
+            "audioFormat": serde_json::Value::Null,
+        }));
+    }
+    for (fmt, name) in [("mp3", "صوت فقط (MP3)"), ("m4a", "صوت فقط (M4A)")] {
+        items.push(json!({
+            "id": serde_json::Value::Null, "label": name, "ext": fmt,
+            "height": serde_json::Value::Null, "size": serde_json::Value::Null,
+            "audioOnly": true, "audioFormat": fmt,
+        }));
+    }
+    json!({
+        "type": "formats",
+        "url": info.webpage_url,
+        "title": info.title,
+        "formats": items,
+    })
 }
 
 fn ws_accept(key: &str) -> String {

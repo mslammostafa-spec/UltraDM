@@ -1,6 +1,7 @@
-// UltraDM — الزر العائم فوق مشغلات الفيديو والصوت.
+// UltraDM — الزر العائم فوق مشغلات الفيديو والصوت مع قائمة الجودات والصيغ.
 // يدعم يوتيوب وفيسبوك وإنستغرام وتيك توك وإكس/تويتر وريديت وغيرها،
-// ويستخدم ألوان الثيم المختار في UltraDM (يتزامن عبر قناة WebSocket).
+// يستعلم عن الجودات عبر yt-dlp داخل UltraDM (قناة WebSocket)، ويعرض
+// قائمة زجاجية منسدلة تحت الزر، ثم يرسل الجودة المختارة للتحميل فورًا.
 (function () {
   "use strict";
   const S = self.UltraDMShared;
@@ -37,6 +38,138 @@
     if (label) label.textContent = lastLabel;
     btn.title = lastLabel;
     btn.setAttribute("aria-label", lastLabel);
+  }
+
+  // ——— قناة WebSocket مع UltraDM: استعلام الجودات (probe) وبدء التحميل ———
+  let ws = null;
+  let wsSeq = 0;
+  const wsWaiters = new Map();
+
+  function wsSend(msg, timeoutMs) {
+    return new Promise((resolve) => {
+      const id = "r" + ++wsSeq;
+      const wait = { resolve, timer: setTimeout(() => {
+        wsWaiters.delete(id);
+        resolve(null);
+      }, timeoutMs || 20000) };
+      wsWaiters.set(id, wait);
+      msg.id = id;
+      const send = () => ws.send(JSON.stringify(msg));
+      if (ws && ws.readyState === 1) send();
+      else {
+        openWs(() => {
+          if (ws && ws.readyState === 1) send();
+          else {
+            clearTimeout(wait.timer);
+            wsWaiters.delete(id);
+            resolve(null);
+          }
+        });
+      }
+    });
+  }
+
+  function openWs(ready) {
+    if (ws && (ws.readyState === 0 || ws.readyState === 1)) { ready && ready(); return; }
+    try { ws = new WebSocket("ws://127.0.0.1:24580/ultradm"); } catch { return; }
+    ws.onopen = () => ready && ready();
+    ws.onmessage = (ev) => {
+      let m = null;
+      try { m = JSON.parse(ev.data); } catch { return; }
+      if (m.id && wsWaiters.has(m.id)) {
+        const w = wsWaiters.get(m.id);
+        clearTimeout(w.timer);
+        wsWaiters.delete(m.id);
+        w.resolve(m);
+      }
+    };
+    ws.onerror = () => {};
+  }
+
+  async function probeFormats(url) {
+    const res = await wsSend({ type: "probe", url }, 25000);
+    return res && res.type === "formats" ? res : null;
+  }
+
+  async function startDownload(url, fmt) {
+    const msg = { type: "download", url };
+    if (fmt.audioOnly) {
+      msg.audio_only = true;
+      msg.audio_format = fmt.audioFormat;
+    } else if (fmt.id && fmt.id !== "best") {
+      msg.format_id = fmt.id;
+    }
+    const res = await wsSend(msg, 15000);
+    return !!(res && res.type === "download-started");
+  }
+
+  // ——— القائمة الزجاجية المنسدلة ———
+  function closeMenus() {
+    document.querySelectorAll(".ultradm-menu").forEach((m) => m.remove());
+  }
+  document.addEventListener("click", (ev) => {
+    if (!ev.target.closest || !ev.target.closest(".ultradm-menu, .ultradm-fab")) closeMenus();
+  }, true);
+
+  function fmtSize(bytes) {
+    if (!bytes) return "";
+    const u = ["بايت", "كيلوبايت", "ميغابايت", "غيغابايت"];
+    let i = 0, n = bytes;
+    while (n >= 1024 && i < u.length - 1) { n /= 1024; i++; }
+    return " · " + (i ? n.toFixed(1) : n) + " " + u[i];
+  }
+
+  function buildMenu(anchor, title, formats, url, btn) {
+    closeMenus();
+    const menu = document.createElement("div");
+    menu.className = "ultradm-menu";
+    menu.dir = "rtl";
+    menu.style.setProperty("--ultradm-accent", theme.accent);
+    menu.style.setProperty("--ultradm-glow", theme.glow);
+    const head = document.createElement("div");
+    head.className = "ultradm-menu-head";
+    head.textContent = title ? "جودات التحميل — " + title : "جودات التحميل";
+    menu.appendChild(head);
+    formats.forEach((f) => {
+      const it = document.createElement("button");
+      it.className = "ultradm-menu-item";
+      it.type = "button";
+      it.innerHTML =
+        '<span class="ultradm-menu-q">' + f.label + (f.ext ? " (" + f.ext + ")" : "") + "</span>" +
+        (f.size ? '<span class="ultradm-menu-size">' + fmtSize(f.size) + "</span>" : "");
+      it.addEventListener("click", async (ev) => {
+        ev.preventDefault();
+        ev.stopPropagation();
+        it.classList.add("sending");
+        it.querySelector(".ultradm-menu-q").textContent = "جارٍ الإرسال…";
+        const ok = await startDownload(url, f);
+        closeMenus();
+        flash(btn, ok ? "بدأ التحميل في UltraDM ✓" : "تعذّر إرسال التحميل");
+      });
+      menu.appendChild(it);
+    });
+    document.body.appendChild(menu);
+    // ضع القائمة تحت الزر مع قلبها في صفحات RTL (مثل يوتيوب العربي).
+    const r = anchor.getBoundingClientRect();
+    const mw = menu.offsetWidth || 260;
+    const mh = menu.offsetHeight || 200;
+    let left = r.left + r.width / 2 - mw / 2;
+    left = Math.max(8, Math.min(left, innerWidth - mw - 8));
+    let top = r.bottom + 6;
+    if (top + mh > innerHeight - 8) top = Math.max(8, r.top - mh - 6);
+    menu.style.left = left + "px";
+    menu.style.top = top + "px";
+  }
+
+  async function openQualityMenu(btn, url) {
+    btn.classList.add("loading");
+    const cached = await probeFormats(url);
+    btn.classList.remove("loading");
+    if (!cached || !Array.isArray(cached.formats) || !cached.formats.length) {
+      flash(btn, "تعذّر جلب الجودات — افتح UltraDM");
+      return;
+    }
+    buildMenu(btn, cached.title, cached.formats, url, btn);
   }
 
   function openInUltraDM(url, pageUrl, btn) {
@@ -89,7 +222,8 @@
       ev.preventDefault();
       ev.stopPropagation();
       const url = currentMediaUrl(container);
-      if (url) openInUltraDM(url, pageUrl, btn);
+      if (!url) { flash(btn, "لا يوجد فيديو في هذه الصفحة"); return; }
+      openQualityMenu(btn, url);
     });
     return btn;
   }
