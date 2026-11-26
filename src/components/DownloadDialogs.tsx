@@ -177,9 +177,30 @@ export function DownloadInfoDialog({
       </div>
 
       <Field label="رابط التحميل (URL)">
-        <input dir="ltr" value={url} onChange={(e) => setUrl(e.target.value)} placeholder="https://example.com/file.zip"
+        <input dir="ltr" value={url} onChange={(e) => setUrl(e.target.value)} placeholder="https://example.com/file.zip أو magnet:?xt=…"
                className="w-full bg-transparent outline-none text-[13px] placeholder:opacity-50" style={{ color: "var(--text)" }} />
       </Field>
+
+      {isTorrent && (
+        <Field label="أو اختر ملف تورنت (.torrent)">
+          <button
+            type="button"
+            onClick={async () => {
+              try {
+                const { invoke } = await import("@tauri-apps/api/core");
+                const picked = await invoke<string | null>("pick_torrent_file");
+                if (picked) setUrl(picked);
+              } catch (e) {
+                setProbeErr(e instanceof Error ? e.message : String(e));
+              }
+            }}
+            className="flex items-center gap-2 h-9 px-3 rounded-xl text-[12.5px] font-bold cursor-pointer"
+            style={{ background: "var(--surface-2)", color: "var(--text)" }}
+          >
+            اختيار ملف .torrent
+          </button>
+        </Field>
+      )}
 
       <div className="grid sm:grid-cols-2 gap-3">
         <Field label="التصنيف (Category)">

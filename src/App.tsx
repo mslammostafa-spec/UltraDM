@@ -116,15 +116,9 @@ export default function App() {
     setSettingsOpen(false);
   };
 
-  // فتح "معلومات التحميل" في نافذة مستقلة على سطح المكتب (فوق المتصفح)؛
-  // وفي المعاينة الويبية تبقى داخل النافذة الرئيسية.
+  // فتح "معلومات التحميل" داخل النافذة الرئيسية دائمًا (نموذج React)
+  // — لا نافذة WebviewWindow مستقلة لإضافة الروابط أو التورنت.
   const openInfo = (url: string, torrent: boolean) => {
-    if (!PREVIEW) {
-      import("./lib/auxWindows")
-        .then(({ openAuxWindow }) => openAuxWindow("info", { url, torrent }))
-        .catch(() => setInfo({ url, torrent }));
-      return;
-    }
     setInfo({ url, torrent });
   };
 
@@ -213,7 +207,7 @@ export default function App() {
       setMessage("انتهت التحميلات — يُنفَّذ الإجراء في نسخة سطح المكتب فقط");
       return;
     }
-    if (after === "shutdown" || after === "sleep") {
+    if (after === "sleep") {
       // عدّاد تنازلي 30 ثانية للسلامة مع إمكانية الإلغاء.
       setCountdown(30);
       return;
@@ -226,8 +220,7 @@ export default function App() {
     if (countdown == null) return;
     if (countdown <= 0) {
       setCountdown(null);
-      if (after === "shutdown") requestPower("shutdown").catch((e) => setMessage(String(e)));
-      else if (after === "sleep") requestPower("sleep").catch((e) => setMessage(String(e)));
+      if (after === "sleep") requestPower("sleep").catch((e) => setMessage(String(e)));
       return;
     }
     const t = setTimeout(() => setCountdown((c) => (c == null ? null : c - 1)), 1000);
@@ -575,8 +568,8 @@ export default function App() {
           initialUrl={info.url}
           isTorrent={info.torrent}
           onClose={() => setInfo(null)}
-          onStart={(cfg) => addDownload(cfg, false, info.torrent)}
-          onLater={(cfg) => addDownload(cfg, true, info.torrent)}
+          onStart={(cfg) => addDownload(cfg, false, info.torrent || /^(magnet:|file:.*\.torrent$)/i.test(cfg.url))}
+          onLater={(cfg) => addDownload(cfg, true, info.torrent || /^(magnet:|file:.*\.torrent$)/i.test(cfg.url))}
         />
       )}
       {/* النسخة المكتبية: نافذة مستقلة تظهر فوق المتصفح — لا يوجد ما يُعرض هنا. */}

@@ -62,11 +62,14 @@ export default function SettingsDialog({
       const r = await invoke<BrowserBinding[]>("extension_register_browsers");
       setExt((s) => (s ? { ...s, browsers: r } : s));
       const linked = r.filter((b) => b.hostRegistered).length;
+      const detected = r.filter((b) => b.installed).length;
       setExtMsg({
-        ok: true,
+        ok: linked > 0,
         text: linked > 0
-          ? `تم تثبيت الربط بنجاح لـ ${linked} متصفح.`
-          : "تم تسجيل المضيف، لكن لم يُكتشف أي متصفح مثبّت.",
+          ? `تم تثبيت الربط بنجاح لـ ${linked} من ${detected} متصفح مكتشف.`
+          : detected > 0
+            ? `اكتُشف ${detected} متصفح، لكن تعذّر تسجيل المضيف — أعد المحاولة أو شغّل UltraDM كمسؤول.`
+            : "لم يُكتشف أي متصفح مدعوم على هذا الجهاز.",
       });
     } catch (e) {
       setExtMsg({ ok: false, text: `فشل تثبيت الربط: ${String(e)}` });
@@ -272,8 +275,8 @@ export default function SettingsDialog({
                       style={{ background: b.hostRegistered ? "#34d399" : b.installed ? "#fbbf24" : "var(--muted)" }}
                       aria-hidden
                     />
-                    <span style={{ color: "var(--text)" }}>{b.browser}</span>
-                    <span className="ms-auto" style={{ color: "var(--muted)" }}>
+                    <span className="whitespace-nowrap truncate" style={{ color: "var(--text)" }}>{b.browser}</span>
+                    <span className="ms-auto whitespace-nowrap" style={{ color: "var(--muted)" }}>
                       {b.hostRegistered ? "مرتبط" : b.installed ? "غير مرتبط" : "غير مثبت"}
                     </span>
                   </li>

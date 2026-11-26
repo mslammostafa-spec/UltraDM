@@ -118,10 +118,37 @@ fn quit_app(app: tauri::AppHandle) {
     exit_app(app);
 }
 
+/// منتقي ملفات أصلي لملف .torrent (بدون اعتماديات إضافية):
+/// PowerShell OpenFileDialog على ويندوز، وخطأ عربي واضح في غير ذلك.
+#[tauri::command]
+fn pick_torrent_file() -> Result<Option<String>, String> {
+    #[cfg(target_os = "windows")]
+    {
+        use std::os::windows::process::CommandExt;
+        const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+        let out = std::process::Command::new("powershell")
+            .args([
+                "-NoProfile", "-Command",
+                "Add-Type -AssemblyName System.Windows.Forms | Out-Null; \
+                 $d = New-Object System.Windows.Forms.OpenFileDialog; \
+                 $d.Filter = 'Torrent (*.torrent)|*.torrent'; \
+                 if ($d.ShowDialog() -eq 'OK') { [Console]::Out.Write($d.FileName) }",
+            ])
+            .creation_flags(CREATE_NO_WINDOW)
+            .output()
+            .map_err(|e| format!("تعذّر فتح منتقي الملفات: {e}"))?;
+        let s = String::from_utf8_lossy(&out.stdout).trim().to_string();
+        Ok(if s.is_empty() { None } else { Some(s) })
+    }
+    #[cfg(not(target_os = "windows"))]
+    {
+        Err("منتقي الملفات متاح على ويندوز فقط — الصق رابط .torrent يدويًا".into())
+    }
+}
+
 /// فتح مجلد الملف المحفوظ في مدير ملفات النظام (وتحديد الملف على ويندوز).
 #[tauri::command]
-fn open_path(path: String) -> Result<(), String> {
-    let p = std::path::PathBuf::from(&path);
+fn open_path(path: String) -> Result<(), String> {    let p = std::path::PathBuf::from(&path);
     if !p.exists() {
         return Err(format!("المسار غير موجود: {path}"));
     }
@@ -484,6 +511,7 @@ pub fn run() {
             download::engine_set_threads,
             download::engine_set_speed_limit,
             open_path,
+            pick_torrent_file,
             disk_free,
             settings::load_settings,
             settings::save_settings,

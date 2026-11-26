@@ -172,7 +172,7 @@ async function connectWs() {
     setStatus("online");
     // اطلب الثيم الحالي من البرنامج ومرّر الإعدادات (فقط عندما تكون القناة OPEN فعلًا).
     if (socket.readyState === WebSocket.OPEN) {
-      socket.send(JSON.stringify({ type: "hello", extension: "ultradm", version: "1.1.11" }));
+      socket.send(JSON.stringify({ type: "hello", extension: "ultradm", version: "1.1.13" }));
     }
   };
   ws.onmessage = (ev) => {
@@ -347,9 +347,23 @@ chrome.contextMenus.onClicked.addListener((info, _tab) => {
 // بديل موثوق لقناة الصفحة: يمرر طلب تحميل من content script عبر WS أو Native.
 chrome.runtime.onMessage.addListener((m, _s, respond) => {
   if (m && m.type === "ULTRADM_DOWNLOAD") {
+    // WebSocket أولًا، ثم POST /add كبديل تلقائي حين تكون القناة مغلقة.
     wsSend({ type: "download", url: m.url, format_id: m.format_id, audio_only: m.audio_only, audio_format: m.audio_format }, 15000)
-      .then((res) => respond({ ok: !!(res && res.type === "download-started") }))
-      .catch(() => respond({ ok: false }));
+      .then(async (res) => {
+        if (res && res.type === "download-started") return { ok: true, transport: "ws" };
+        try {
+          const r = await fetch(S.HTTP_URL + "/add", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ url: m.url }),
+          });
+          return { ok: r.ok, transport: "http" };
+        } catch {
+          return { ok: false, transport: "none" };
+        }
+      })
+      .then(respond)
+      .catch(() => respond({ ok: false, transport: "none" }));
     return true; // استجابة غير متزامنة
   }
   // استعلام الجودات من الزر العائم عبر القناة الوحيدة (Service Worker).

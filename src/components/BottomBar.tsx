@@ -1,4 +1,4 @@
-import { Power, MoonStar, LogOut, ShieldCheck, X } from "lucide-react";
+import { Power, MoonStar, ShieldCheck, X } from "lucide-react";
 import type { AfterFinish } from "../lib/ipc";
 
 const OPTIONS: Array<{
@@ -8,9 +8,7 @@ const OPTIONS: Array<{
   icon: typeof Power;
 }> = [
   { id: "none", label: "بدون إجراء", hint: "يبقى البرنامج مفتوحًا", icon: ShieldCheck },
-  { id: "shutdown", label: "إغلاق الجهاز", hint: "يُغلق ويندوز بعد عدّاد 30 ثانية", icon: Power },
   { id: "sleep", label: "وضع السكون", hint: "يُدخل الجهاز في السكون", icon: MoonStar },
-  { id: "quit", label: "إغلاق البرنامج", hint: "يُنهي UltraDM فقط", icon: LogOut },
 ];
 
 export default function BottomBar({
@@ -62,7 +60,7 @@ export default function BottomBar({
           className="flex items-center gap-2 text-[12.5px] font-bold rounded-xl px-3 py-1.5"
           style={{ background: "#e5484d22", color: "#e5484d" }}
         >
-          {action === "shutdown" ? "إغلاق الجهاز خلال" : "السكون خلال"} {countdown} ثانية
+          السكون خلال {countdown} ثانية
           {onCancelCountdown && (
             <button
               onClick={onCancelCountdown}

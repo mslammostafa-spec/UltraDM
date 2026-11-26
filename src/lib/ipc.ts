@@ -65,7 +65,7 @@ export interface Download {
   savePath?: string;
 }
 
-export type AfterFinish = "none" | "shutdown" | "sleep" | "quit";
+export type AfterFinish = "none" | "sleep";
 
 export const MAX_THREADS = 32;
 
@@ -84,9 +84,7 @@ export async function exitApp(): Promise<void> {
 }
 
 export async function runAfterFinish(action: AfterFinish): Promise<void> {
-  if (action === "shutdown") return shutdownDevice();
   if (action === "sleep") return sleepDevice();
-  if (action === "quit") return exitApp();
 }
 
 // ─── محرك التحميل في Rust ───

@@ -242,13 +242,6 @@
   }
 
   // ——— كبسولة يوتيوب الزجاجية (الزاوية العلوية اليسرى للمشغل) ———
-  const YT_QUALITIES = [
-    { label: "فيديو 1080p (Full HD - MP4)", id: "bestvideo[height<=1080][vcodec^=avc1]+bestaudio[acodec^=mp4a]/best[height<=1080]" },
-    { label: "فيديو 720p (HD - MP4)", id: "bestvideo[height<=720][vcodec^=avc1]+bestaudio[acodec^=mp4a]/best[height<=720]" },
-    { label: "فيديو 480p (SD - MP4)", id: "bestvideo[height<=480][vcodec^=avc1]+bestaudio[acodec^=mp4a]/best[height<=480]" },
-    { label: "فيديو 360p (MP4)", id: "bestvideo[height<=360][vcodec^=avc1]+bestaudio[acodec^=mp4a]/best[height<=360]" },
-    { label: "صوت فقط (MP3 / M4A)", audioOnly: true, audioFormat: "mp3" },
-  ];
 
   function ytPageUrl() {
     const m = location.href.match(/(?:youtube\.com\/(?:watch\?.*v=|shorts\/)|youtu\.be\/)([\w-]{11})/i);
@@ -271,17 +264,20 @@
     cap.innerHTML =
       HEX_SVG +
       '<span class="ultradm-fab-label" style="font-size:12px;padding:0 2px">تحميل ▾</span>';
-    cap.addEventListener("click", (ev) => {
+    cap.addEventListener("click", async (ev) => {
       ev.preventDefault();
       ev.stopPropagation();
-      const formats = YT_QUALITIES.map((q) => ({
-        label: q.label,
-        id: q.id,
-        audioOnly: q.audioOnly,
-        audioFormat: q.audioFormat,
-        ext: q.audioOnly ? "mp3" : "mp4"
-      }));
-      buildMenu(cap, "UltraDM", formats, url, cap);
+      // إرسال فوري للصفحة الحالية إلى UltraDM (نافذة الجودات تُفتح في البرنامج).
+      const label = cap.querySelector(".ultradm-fab-label");
+      const setLabel = (t) => { if (label) label.textContent = t; };
+      setLabel("جارٍ الإرسال…");
+      let ok = false;
+      try {
+        const res = await chrome.runtime.sendMessage({ type: "ULTRADM_DOWNLOAD", url: window.location.href });
+        ok = !!(res && res.ok);
+      } catch { ok = false; }
+      setLabel(ok ? "تم الإرسال ✓" : "افتح UltraDM أولاً");
+      setTimeout(() => setLabel("تحميل ▾"), 2500);
     });
     document.documentElement.appendChild(cap);
     // موضع ديناميكي: داخل حدود المشغل الحالية، الزاوية العلوية اليسرى.
