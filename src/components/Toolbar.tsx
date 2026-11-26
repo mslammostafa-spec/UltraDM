@@ -1,7 +1,7 @@
 import { useState } from "react";
 import {
   Link2, Magnet, Pause, Play, Trash2, CalendarClock, Moon, Sun, Undo2,
-  Settings, X, RefreshCw, Info,
+  Settings, RefreshCw, Info,
 } from "lucide-react";
 import { inDesktop } from "../lib/ipc";
 import { checkForUpdates, type UpdateStatus } from "../lib/updater";
@@ -33,26 +33,6 @@ export function ToolbarButton({
       style={{ ...styles[variant], outlineColor: "var(--color-accent)", boxShadow: "var(--shadow-1)" }}
     >
       {children}
-    </button>
-  );
-}
-
-function XHideButton() {
-  return (
-    <button
-      className="w-11 h-11 grid place-items-center cursor-pointer transition-colors duration-150 hover:!bg-[#e5484d] hover:!text-white pointer-events-auto"
-      style={{ color: "var(--muted)" }}
-      aria-label="إخفاء إلى شريط المهام" title="إخفاء إلى شريط المهام"
-      onMouseDown={(e) => e.stopPropagation()}
-      onDoubleClick={(e) => e.stopPropagation()}
-      onClick={async () => {
-        try {
-          const { getCurrentWindow } = await import("@tauri-apps/api/window");
-          await getCurrentWindow().hide();
-        } catch { /* غير مكتبي */ }
-      }}
-    >
-      <X size={16} />
     </button>
   );
 }
