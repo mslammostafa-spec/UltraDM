@@ -116,15 +116,21 @@ async fn handle_conn(app: AppHandle, mut stream: tokio::net::TcpStream) -> Resul
         let _ = stream.write_all(resp.as_bytes()).await;
         return Ok(());
     }
-    // POST /add: إضافة تحميل من أي صفحة (CORS مفتوح) — يجيب 204 ويفتح
-    // نافذة "معلومات التحميل" في التطبيق بالرابط المُرسل.
+    // مصافحة CORS المسبقة: أي OPTIONS على أي مسار تجيب 204 بترويسات كاملة.
+    if text.starts_with("OPTIONS") {
+        let resp = "HTTP/1.1 204 No Content\r\nAccess-Control-Allow-Origin: *\r\nAccess-Control-Allow-Methods: POST, GET, OPTIONS\r\nAccess-Control-Allow-Headers: Content-Type\r\nAccess-Control-Max-Age: 86400\r\nConnection: close\r\n\r\n";
+        let _ = stream.write_all(resp.as_bytes()).await;
+        return Ok(());
+    }
+    // POST /add: إضافة تحميل من أي صفحة (CORS مفتوح) — يقبل JSON
+    // {"url": "..."} أو نصًا خامًا، ويجيب 204 ويفتح نافذة "معلومات التحميل".
     if text.starts_with("POST /add") {
-        let url = text
-            .split("\r\n\r\n")
-            .nth(1)
-            .unwrap_or("")
-            .trim()
-            .to_string();
+        let body = text.split("\r\n\r\n").nth(1).unwrap_or("").trim().to_string();
+        let url = serde_json::from_str::<serde_json::Value>(&body)
+            .ok()
+            .and_then(|v| v.get("url").and_then(|u| u.as_str()).map(String::from))
+            .filter(|u| !u.is_empty())
+            .unwrap_or(body);
         let resp = "HTTP/1.1 204 No Content\r\nAccess-Control-Allow-Origin: *\r\nAccess-Control-Allow-Methods: POST, OPTIONS\r\nAccess-Control-Allow-Headers: Content-Type\r\nConnection: close\r\n\r\n";
         let _ = stream.write_all(resp.as_bytes()).await;
         if !url.is_empty() && url.len() < 8192 {
@@ -229,8 +235,19 @@ async fn handle_message(app: &AppHandle, raw: &str) -> Option<String> {
         // طلب قائمة الجودات للزر العائم في الإضافة (yt-dlp).
         "probe" => {
             let url = v.get("url")?.as_str()?.to_string();
-            let info = super::media::media_probe(url).await.ok()?;
-            Some(probe_reply(&info).to_string())
+            // خطأ صادق ومُهيكل: إن كانت الأدوات غير مثبّتة قل ذلك بوضوح،
+            // وإن فشل yt-dlp مرّر رسالته الحقيقية بدل الخطأ العام.
+            let tools = super::media::media_check();
+            if !tools.ytdlp {
+                return Some("{\"type\":\"error\",\"code\":\"tools-missing\",\"message\":\"yt-dlp غير مثبَّت — افتح UltraDM وثبّت الأدوات من الإعدادات\"}".into());
+            }
+            match super::media::media_probe(url).await {
+                Ok(info) => Some(probe_reply(&info).to_string()),
+                Err(e) => {
+                    let msg = serde_json::to_string(&e).unwrap_or_default();
+                    Some(format!("{{\"type\":\"error\",\"code\":\"probe-failed\",\"message\":{msg}}}"))
+                }
+            }
         }
         // بدء تحميل جودة محددة اختارها المستخدم من القائمة.
         "download" => {
