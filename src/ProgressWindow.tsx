@@ -10,6 +10,10 @@ export default function ProgressWindow() {
   const [download, setDownload] = useState<Download | null>(null);
 
   useEffect(() => {
+    // نفس ثيم النافذة الرئيسية.
+    import("./lib/themes").then(({ applyTheme }) => {
+      applyTheme(localStorage.getItem("ultradm.theme") || "glass-emerald-cyan");
+    });
     if (!isTauri()) return;
     const un1 = listen<Download>("aux://progress", (e) => setDownload(e.payload));
     const un2 = listen<Download>("download://progress", (e) => {

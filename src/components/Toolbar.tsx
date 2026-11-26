@@ -107,6 +107,12 @@ export default function Toolbar({
       className="flex items-center gap-2 px-4 h-16 border-b shrink-0 select-none"
       style={{ background: "var(--surface)", borderColor: "var(--border)" }}
     >
+      {/* منطقة الأزرار: مستثناة تماماً من السحب — كل نقرة تعمل ولا تُكبّر النافذة. */}
+      <div
+        className="flex items-center gap-2 h-full"
+        onMouseDown={(e) => e.stopPropagation()}
+        onDoubleClick={(e) => e.stopPropagation()}
+      >
       <ToolbarButton variant="primary" label="إضافة رابط تحميل" onClick={() => { flash("link"); onAddLink(); }}>
         <Link2 size={17} />
         <span className="hidden min-[1100px]:inline">إضافة رابط</span>
@@ -169,6 +175,7 @@ export default function Toolbar({
           <WindowControls maximized={maximized} onMax={() => apiMax()} />
         </div>
       )}
+      </div>
     </header>
   );
 }

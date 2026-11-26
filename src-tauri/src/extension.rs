@@ -105,6 +105,17 @@ async fn handle_conn(app: AppHandle, mut stream: tokio::net::TcpStream) -> Resul
         }
     }
     let text = String::from_utf8_lossy(&buf);
+    // فحص صحة خفيف للإضافة: GET /health يجيب 200 بدون مصافحة WebSocket.
+    if text.starts_with("GET /health") {
+        let body = "{\"ok\":true,\"app\":\"ultradm\"}";
+        let resp = format!(
+            "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+            body.len(),
+            body
+        );
+        let _ = stream.write_all(resp.as_bytes()).await;
+        return Ok(());
+    }
     if !text.starts_with("GET /ultradm") {
         return Err("مسار غير معروف".into());
     }
@@ -359,6 +370,13 @@ pub fn extension_binding_status() -> ExtensionBindingStatus {
             ("Edge", "HKCU\\Software\\Microsoft\\Edge\\NativeMessagingHosts"),
             ("Brave", "HKCU\\Software\\BraveSoftware\\Brave\\NativeMessagingHosts"),
             ("Opera", "HKCU\\Software\\Opera Software\\NativeMessagingHosts"),
+            ("Vivaldi", "HKCU\\Software\\Vivaldi\\NativeMessagingHosts"),
+            ("Chromium", "HKCU\\Software\\Chromium\\NativeMessagingHosts"),
+            ("Whale", "HKCU\\Software\\Naver\\Whale\\NativeMessagingHosts"),
+            ("Firefox", "HKCU\\Software\\Mozilla\\NativeMessagingHosts"),
+            ("Waterfox", "HKCU\\Software\\Waterfox\\NativeMessagingHosts"),
+            ("LibreWolf", "HKCU\\Software\\LibreWolf\\NativeMessagingHosts"),
+            ("Zen", "HKCU\\Software\\Zen\\NativeMessagingHosts"),
         ]
         .iter()
         .map(|(name, key)| BrowserBinding {
@@ -379,7 +397,7 @@ pub fn extension_binding_status() -> ExtensionBindingStatus {
         ExtensionBindingStatus {
             native_host_name: NATIVE_HOST_NAME.into(),
             manifest_path: native_manifest_path().display().to_string(),
-            browsers: ["Chrome", "Edge", "Brave", "Opera"]
+            browsers: ["Chrome", "Edge", "Brave", "Opera", "Vivaldi", "Chromium", "Whale", "Firefox", "Waterfox", "LibreWolf", "Zen"]
                 .into_iter()
                 .map(|b| BrowserBinding { browser: b, installed: false, host_registered: false })
                 .collect(),
@@ -401,6 +419,13 @@ pub fn extension_register_browsers() -> Result<Vec<BrowserBinding>, String> {
             ("Edge", "Software\\Microsoft\\Edge\\NativeMessagingHosts"),
             ("Brave", "Software\\BraveSoftware\\Brave\\NativeMessagingHosts"),
             ("Opera", "Software\\Opera Software\\NativeMessagingHosts"),
+            ("Vivaldi", "Software\\Vivaldi\\NativeMessagingHosts"),
+            ("Chromium", "Software\\Chromium\\NativeMessagingHosts"),
+            ("Whale", "Software\\Naver\\Whale\\NativeMessagingHosts"),
+            ("Firefox", "Software\\Mozilla\\NativeMessagingHosts"),
+            ("Waterfox", "Software\\Waterfox\\NativeMessagingHosts"),
+            ("LibreWolf", "Software\\LibreWolf\\NativeMessagingHosts"),
+            ("Zen", "Software\\Zen\\NativeMessagingHosts"),
         ];
         for (_, sub) in browsers {
             let (k, _) = hkcu
@@ -474,12 +499,44 @@ fn browser_installed(browser: &str) -> bool {
             r"Opera\opera.exe",
             r"Opera\launcher.exe",
         ],
+        // Vivaldi
+        &[r"Vivaldi\Application\vivaldi.exe"],
+        // Chromium
+        &[
+            r"Chromium\Application\chrome.exe",
+            r"Chromium\chrome.exe",
+        ],
+        // Whale
+        &[r"Naver\Whale\Application\whale.exe"],
+        // Firefox (Gecko — عبر ملف manifest في distribution directory)
+        &[
+            r"Mozilla Firefox\firefox.exe",
+            r"Firefox Developer Edition\firefox.exe",
+            r"Firefox Nightly\firefox.exe",
+        ],
+        // Waterfox
+        &[r"Waterfox\waterfox.exe"],
+        // LibreWolf
+        &[r"LibreWolf\librewolf.exe"],
+        // Zen
+        &[
+            r"Zen Browser\firefox.exe",
+            r"zen\zen.exe",
+        ],
     ];
     let idx = match browser {
         "Chrome" => 0,
         "Edge" => 1,
         "Brave" => 2,
-        _ => 3,
+        "Opera" => 3,
+        "Vivaldi" => 4,
+        "Chromium" => 5,
+        "Whale" => 6,
+        "Firefox" => 7,
+        "Waterfox" => 8,
+        "LibreWolf" => 9,
+        "Zen" => 10,
+        _ => 0,
     };
 
     let pf = std::env::var("ProgramFiles").unwrap_or_else(|_| r"C:\Program Files".into());

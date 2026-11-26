@@ -42,7 +42,7 @@ export function DownloadInfoDialog({
   const [category, setCategory] = useState<Exclude<Category, "all">>(detected);
   const [remember, setRemember] = useState(true);
   const [savePath, setSavePath] = useState(
-    () => localStorage.getItem(PATH_KEY + detected) ?? "C:\\Users\\Downloads\\UltraDM",
+    () => localStorage.getItem(PATH_KEY + detected) ?? defaultPathFor(detected as Exclude<Category, "all">),
   );
 
   // عند تغيّر التصنيف يُستبدل المسار المحفوظ لهذا التصنيف إن وُجد.
@@ -377,7 +377,9 @@ function Field({ label, children }: { label: string; children: React.ReactNode }
 }
 
 function defaultPathFor(c: Exclude<Category, "all">): string {
-  return `C:\\Users\\Downloads\\UltraDM\\${CATEGORY_LABEL[c]}`;
+  // مجلد التخزين الرسمي: %LOCALAPPDATA%\UltraDM (يتطلبه نموذج Windows).
+  const base = "C:\\Users\\%USERNAME%\\AppData\\Local\\UltraDM";
+  return `${base}\\${CATEGORY_LABEL[c]}`;
 }
 
 /* ─────────────── نافذة حالة التحميل التفصيلية (Download Progress Window) ─────────────── */

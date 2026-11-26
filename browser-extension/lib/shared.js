@@ -5,6 +5,7 @@
 
   const shared = {
     WS_URL: "ws://127.0.0.1:24580/ultradm",
+    HTTP_URL: "http://127.0.0.1:24580",
     NATIVE_HOST: "com.ultradm.bridge",
 
     // ثيمات UltraDM: نفس معرّفات src/lib/themes.ts — يستخدمها الزر العائم.

@@ -27,7 +27,7 @@ import AboutDialog from "./components/AboutDialog";
 import type { UpdateStatus } from "./lib/updater";
 import { ListFilter } from "lucide-react";
 import { inDesktop, engineAdd, enginePause, engineResume, engineCancel, registerTorrentHandler, requestPower, runAfterFinish, matchesFilter, parseFilterId, openPath, type AfterFinish, type Download } from "./lib/ipc";
-import { DEFAULT_SETTINGS, applyTheme, type Settings } from "./lib/themes";
+import { DEFAULT_SETTINGS, applyTheme, THEMES, DEFAULT_THEME_ID, type Settings } from "./lib/themes";
 import { loadSettings, saveSettings } from "./lib/settings";
 import { fileNameFromUrl, previewDownloads, previewSizeFor } from "./lib/format";
 
@@ -45,17 +45,24 @@ interface EngineSnapshotLike {
 const THEME_KEY = "ultradm.theme";
 const PREVIEW = !inDesktop();
 
-function initialDark(): boolean {
-  const saved = localStorage.getItem(THEME_KEY);
-  if (saved) return saved === "dark";
-  return window.matchMedia("(prefers-color-scheme: dark)").matches;
+// لا يوجد "وضع داكن مستقل": الوضع يُشتق دائمًا من الثيم المختار فقط
+// (كل ثيم داكن أو فاتح بطبيعته). يُطبَّق كسمة data-theme على <html>؛
+// الكلاس dark في CSS يُدار حصراً عبر data-theme.
+function initialThemeId(): string {
+  return localStorage.getItem(THEME_KEY) || DEFAULT_THEME_ID;
+}
+
+function syncThemeDom(id: string) {
+  const t = applyTheme(id);
+  localStorage.setItem(THEME_KEY, t.id);
+  return t;
 }
 
 export default function App() {
   const [settings, setSettings] = useState<Settings>(DEFAULT_SETTINGS);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [about, setAbout] = useState<{ status: UpdateStatus | null } | null>(null);
-  const [dark, setDark] = useState(initialDark);
+  const [themeId, setThemeId] = useState(initialThemeId);
   const [active, setActive] = useState<string>("all");
   const [downloads, setDownloads] = useState<Download[]>(() => (PREVIEW ? previewDownloads() : []));
   const [deleted, setDeleted] = useState<Download[]>([]);
@@ -78,8 +85,8 @@ export default function App() {
   useEffect(() => {
     loadSettings().then(async (s) => {
       setSettings(s);
-      const t = applyTheme(s.theme);
-      setDark(t.dark);
+      const t = syncThemeDom(s.theme);
+      setThemeId(t.id);
       try {
         const { isTauri } = await import("@tauri-apps/api/core");
         if (isTauri()) {
@@ -94,16 +101,17 @@ export default function App() {
     });
   }, []);
 
-  // حفظ الثيم الليلي/النهاري الفوري (سريع)؛ الحفظ الدائم يتم بزر "حفظ وإغلاق".
+  // الثيم الوحيد المصدر للحالة الداكنة: يُشتق من الثيم المختار. لا يوجد
+  // زر "وضع ليلي" مستقل ولا prefers-color-scheme — لضمان عدم تضارب الوضعين.
   useEffect(() => {
-    document.documentElement.classList.toggle("dark", dark);
-    localStorage.setItem(THEME_KEY, dark ? "dark" : "light");
-  }, [dark]);
+    const t = syncThemeDom(themeId);
+    setThemeId(t.id);
+  }, [themeId]);
 
   const handleSaveSettings = async (s: Settings) => {
     setSettings(s);
-    const t = applyTheme(s.theme);
-    setDark(t.dark);
+    const t = syncThemeDom(s.theme);
+    setThemeId(t.id);
     await saveSettings(s);
     setSettingsOpen(false);
   };
@@ -283,6 +291,31 @@ export default function App() {
       return;
     }
     try {
+      // Magnet و.torrent يذهبان لمحرك التورنت (librqbit) لا لمحرك HTTP.
+      if (torrent) {
+        const { torrentAdd } = await import("./lib/ipc");
+        const snap = await torrentAdd(cfg.url, cfg.savePath || undefined);
+        const tid = `torrent-${snap.id}`;
+        setDownloads((ds) => [
+          ...ds.filter((d) => d.id !== tid),
+          {
+            id: tid,
+            name: snap.name,
+            category: "torrent" as const,
+            sizeBytes: snap.total_bytes,
+            progress: snap.progress,
+            speedBps: snap.down_bps,
+            peakSpeedBps: 0,
+            etaSeconds: null,
+            threads: cfg.threads,
+            status: later ? ("paused" as const) : ("downloading" as const),
+            description: cfg.description,
+            savePath: cfg.savePath,
+          },
+        ]);
+        if (!later) setProgressId(tid);
+        return;
+      }
       const dl = await engineAdd({
         url: cfg.url,
         savePath: cfg.savePath,
@@ -415,8 +448,17 @@ export default function App() {
 
       <main className="flex-1 min-w-0 flex flex-col">
         <Toolbar
-          dark={dark}
-          onToggleTheme={() => setDark((d) => !d)}
+          dark={THEMES.find((t) => t.id === themeId)?.dark ?? true}
+          onToggleTheme={() => {
+            const cur = THEMES.find((t) => t.id === themeId) ?? THEMES[0];
+            // "التبديل" = التنقل بين ثيم داكن وثيم فاتح، لا وضع مستقل.
+            const next = cur.dark
+              ? (THEMES.find((t) => !t.dark) ?? cur)
+              : (THEMES.find((t) => t.dark) ?? cur);
+            syncThemeDom(next.id);
+            setThemeId(next.id);
+            void saveSettings({ ...settings, theme: next.id });
+          }}
           onAddLink={() => openInfo("", false)}
           onAddTorrent={() => openInfo("", true)}
           onScheduler={() => setDialog("scheduler")}

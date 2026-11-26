@@ -267,7 +267,8 @@ fn file_name_from_url(url: &str) -> String {
         .to_string()
 }
 
-/// تنقية اسم ملف قادم من ترويسة: إزالة المحارف الممنوعة والاقتباسات والمسارات.
+/// تنقية اسم ملف قادم من ترويسة: إزالة المحارف الممنوعة والاقتباسات والمسارات،
+/// مع حظر أسماء الأجهزة المحجوزة في ويندوز (CON, NUL, COM1…) ومحارف التحكم.
 fn sanitize_file_name(name: &str) -> String {
     let cleaned: String = name
         .rsplit(['/', '\\'])
@@ -275,9 +276,26 @@ fn sanitize_file_name(name: &str) -> String {
         .unwrap_or(name)
         .chars()
         .filter(|c| !matches!(c, ':' | '*' | '?' | '"' | '<' | '>' | '|'))
+        .filter(|c| !c.is_control())
         .collect();
-    let trimmed = cleaned.trim().trim_end_matches('.').to_string();
-    if trimmed.is_empty() { file_name_from_url("download") } else { trimmed }
+    let trimmed = cleaned.trim().trim_end_matches('.').trim_end_matches(' ').to_string();
+    let base = trimmed.split('.').next().unwrap_or("").to_ascii_uppercase();
+    let reserved = [
+        "CON", "PRN", "AUX", "NUL", "COM1", "COM2", "COM3", "COM4", "COM5", "COM6", "COM7",
+        "COM8", "COM9", "LPT1", "LPT2", "LPT3", "LPT4", "LPT5", "LPT6", "LPT7", "LPT8", "LPT9",
+    ];
+    let safe = if reserved.contains(&base.as_str()) {
+        format!("_{}", trimmed)
+    } else {
+        trimmed
+    };
+    // حد أقصى 180 حرفًا (حد NTFS العملي مع مساحة لاحقة الامتداد).
+    let mut safe = safe;
+    if safe.chars().count() > 180 {
+        let cut: String = safe.chars().take(180).collect();
+        safe = cut;
+    }
+    if safe.is_empty() { file_name_from_url("download") } else { safe }
 }
 
 /// استعلام الحجم: HEAD أولًا، وإذا رفض الخادم نجرّب GET بنطاق بايت واحد.
@@ -691,6 +709,17 @@ async fn run_download(
         persist_item(&it, chunks, etag, last_modified, accepts_ranges);
     }
 
+    // تحقّق نهائي من الحجم (سلامة الملف): إذا اكتمل بنجاح والطول معروف،
+    // يجب أن يطابق الملف حجم الخادم تمامًا وإلا يُعد فشلاً قابلًا للاستئناف.
+    if result.is_ok() && size > 0 {
+        let on_disk = std::fs::metadata(&path).map(|m| m.len()).unwrap_or(0);
+        if on_disk != size {
+            return Err(format!(
+                "فشل التحقق من الحجم: المتوقع {size} بايت والمكتوب {on_disk} بايت — أعد المحاولة للاستئناف"
+            ));
+        }
+    }
+
     emit_progress(app, &engine, &item_arc, &shared).await;
     result
 }
@@ -912,8 +941,11 @@ pub async fn engine_add(
     if lower.ends_with(".webmanifest") || lower.contains(".webmanifest?") || lower.contains(".webmanifest#") {
         return Err("لا يمكن تحميل ملفات webmanifest — هذه ملفات نظام للمواقع وليست ملفات تحميل".into());
     }
-    if !url.starts_with("http://") && !url.starts_with("https://") {
-        return Err("الرابط يجب أن يكون http/https".into());
+    if !url.starts_with("http://") && !url.starts_with("https://") && !lower.starts_with("magnet:")
+        && !lower.ends_with(".torrent") && !lower.contains(".torrent?")
+        && !lower.ends_with(".nzb") && !lower.contains(".nzb?")
+    {
+        return Err("الرابط يجب أن يكون http/https أو magnet: أو رابط .torrent/.nzb".into());
     }
     let threads = threads.clamp(1, MAX_THREADS);
     let (size, _etag, _lm, _ar, cd_name) = probe(&url, &state.0.client).await?;

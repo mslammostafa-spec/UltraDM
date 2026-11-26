@@ -9,6 +9,10 @@ export default function InfoWindow() {
   const [payload, setPayload] = useState<{ url: string; torrent?: boolean } | null>(null);
 
   useEffect(() => {
+    // نفس ثيم النافذة الرئيسية (من localStorage المشترك بين نوافذ التطبيق).
+    import("./lib/themes").then(({ applyTheme }) => {
+      applyTheme(localStorage.getItem("ultradm.theme") || "glass-emerald-cyan");
+    });
     if (!isTauri()) return;
     const un = listen<{ url: string; torrent?: boolean }>("aux://info", (e) =>
       setPayload(e.payload),

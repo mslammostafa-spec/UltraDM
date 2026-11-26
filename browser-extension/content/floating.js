@@ -270,16 +270,21 @@
   }
 
   function ytCapsule(player) {
-    if (!player || player.querySelector(":scope > .ultradm-yt-capsule")) return;
+    if (!player || document.querySelector(".ultradm-yt-capsule")) return;
     const url = ytPageUrl();
     if (!url) return;
     const cap = document.createElement("button");
     cap.type = "button";
     cap.className = "ultradm-fab ultradm-yt-capsule";
-    cap.style.cssText = "position:absolute;top:12px;left:12px;z-index:2147483646;";
+    // مثبّتة على documentElement (لا داخل المشغل) حتى لا تختفي عند إعادة
+    // بناء شجرة المشغل، وموضعها ديناميكي أسفل يمين المشغل بحجم مضغوط.
+    cap.style.cssText =
+      "position:fixed;z-index:2147483646;top:auto;left:auto;right:auto;bottom:auto;";
     cap.dir = "rtl";
     hydrate(cap);
-    cap.innerHTML = HEX_SVG + '<span class="ultradm-fab-label">تحميل عبر UltraDM ▾</span>';
+    cap.innerHTML =
+      HEX_SVG +
+      '<span class="ultradm-fab-label" style="font-size:12px;padding:0 2px">تحميل ▾</span>';
     cap.addEventListener("click", async (ev) => {
       ev.preventDefault();
       ev.stopPropagation();
@@ -291,7 +296,26 @@
         : YT_QUALITIES.map((q) => ({ label: q.label, id: q.audioOnly ? "bestaudio" : q.id, audioOnly: q.audioOnly, audioFormat: q.audioFormat, ext: q.audioOnly ? "mp3/m4a" : "mp4" }));
       buildMenu(cap, probed && probed.title, formats, url, cap);
     });
-    player.appendChild(cap);
+    document.documentElement.appendChild(cap);
+    // موضع ديناميكي: داخل حدود المشغل الحالية، الزاوية العلوية اليسرى.
+    const place = () => {
+      const r = player.getBoundingClientRect();
+      if (r.width < 80 || r.bottom < 0 || r.top > innerHeight) {
+        cap.style.display = "none";
+        return;
+      }
+      cap.style.display = "";
+      cap.style.left = Math.max(8, Math.min(r.left + 12, innerWidth - 140)) + "px";
+      cap.style.top = Math.max(8, r.top + 12) + "px";
+    };
+    place();
+    addEventListener("resize", place, { passive: true });
+    addEventListener("scroll", place, { passive: true, capture: true });
+    // تحديث الموضع مع تغيّر حجم المشغل (ملء الشاشة، تكبير/تصغير) وتنقل يوتيوب.
+    if (typeof ResizeObserver !== "undefined") {
+      new ResizeObserver(place).observe(player);
+    }
+    document.addEventListener("yt-navigate-finish", place, { passive: true });
   }
 
   const attachYt = () => {

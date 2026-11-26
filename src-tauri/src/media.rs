@@ -10,7 +10,7 @@ use std::sync::{Arc, Mutex};
 use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Emitter, State};
 use tokio::io::{AsyncBufReadExt, BufReader};
-use tokio::process::{Child, Command};
+use tokio::process::Child;
 
 /// حالة أداة خارجية: هل مُثبَّتة وأي إصدار.
 #[derive(Serialize)]
@@ -112,11 +112,52 @@ fn run_capture(cmd: &mut std::process::Command) -> Result<String, String> {
     Ok(String::from_utf8_lossy(&out.stdout).trim().to_string())
 }
 
+/// مسار مجلد الأدوات الرسمي: %LOCALAPPDATA%\UltraDM\bin على ويندوز
+/// (و ~/.local/share/UltraDM/bin في غيره)؛ يُفحص أولًا ثم PATH.
+fn tools_bin_dir() -> Option<std::path::PathBuf> {
+    if cfg!(windows) {
+        std::env::var_os("LOCALAPPDATA").map(|l| {
+            std::path::PathBuf::from(l).join("UltraDM").join("bin")
+        })
+    } else {
+        std::env::var_os("HOME").map(|h| {
+            std::path::PathBuf::from(h).join(".local/share/UltraDM/bin")
+        })
+    }
+}
+
+/// أمر الأداة (tokio): من مجلد bin الرسمي إن وُجدت فيه، وإلا من PATH.
+fn tool_cmd(tool: &str) -> tokio::process::Command {
+    let exe = if cfg!(windows) { format!("{tool}.exe") } else { tool.to_string() };
+    let path = tools_bin_dir()
+        .map(|bin| bin.join(&exe))
+        .filter(|p| p.is_file());
+    let mut cmd = match path {
+        Some(p) => tokio::process::Command::new(p),
+        None => tokio::process::Command::new(tool),
+    };
+    cmd.kill_on_drop(true);
+    cmd
+}
+
+/// أمر الأداة (مزامن للاستدعاءات السريعة مثل --version): من مجلد bin الرسمي
+/// إن وُجدت فيه، وإلا من PATH.
+fn tool_cmd_sync(tool: &str) -> std::process::Command {
+    let exe = if cfg!(windows) { format!("{tool}.exe") } else { tool.to_string() };
+    let path = tools_bin_dir()
+        .map(|bin| bin.join(&exe))
+        .filter(|p| p.is_file());
+    match path {
+        Some(p) => std::process::Command::new(p),
+        None => std::process::Command::new(tool),
+    }
+}
+
 /// فحص توفّر yt-dlp و FFmpeg وإصداريهما.
 #[tauri::command]
 pub fn media_check() -> ToolStatus {
-    let ytdlp = run_capture(std::process::Command::new("yt-dlp").arg("--version").stdout(Stdio::piped()).stderr(Stdio::null()));
-    let ffmpeg = run_capture(std::process::Command::new("ffmpeg").arg("-version").stdout(Stdio::piped()).stderr(Stdio::null()));
+    let ytdlp = run_capture(tool_cmd_sync("yt-dlp").arg("--version").stdout(Stdio::piped()).stderr(Stdio::null()));
+    let ffmpeg = run_capture(tool_cmd_sync("ffmpeg").arg("-version").stdout(Stdio::piped()).stderr(Stdio::null()));
     let first = |s: String| s.lines().next().map(String::from);
     ToolStatus {
         ytdlp: ytdlp.is_ok(),
@@ -159,7 +200,7 @@ pub async fn media_probe(url: String) -> Result<MediaInfo, String> {
     let url_arg = url.clone();
     let out = tokio::task::spawn_blocking(move || {
         run_capture(
-            std::process::Command::new("yt-dlp")
+            tool_cmd_sync("yt-dlp")
                 .arg("-J")
                 .arg("--no-playlist")
                 .arg(&url_arg)
@@ -327,7 +368,7 @@ pub fn parse_percent(line: &str) -> Option<f64> {
 pub async fn media_download(app: AppHandle, state: State<'_, MediaHandle>, req: MediaRequest) -> Result<String, String> {
     let id = format!("m{}", state.seq.fetch_add(1, Ordering::Relaxed));
     let args = build_args(&req);
-    let mut child = Command::new("yt-dlp")
+    let mut child = tool_cmd("yt-dlp")
         .args(&args)
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())

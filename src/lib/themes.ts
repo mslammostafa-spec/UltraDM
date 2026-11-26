@@ -107,7 +107,10 @@ export function applyTheme(id: string) {
   const t = THEMES.find((x) => x.id === id) ?? THEMES.find((x) => x.id === DEFAULT_THEME_ID)!;
   const r = document.documentElement;
   const v = t.vars;
-  r.classList.toggle("dark", t.dark);
+  // المصدر الرسمي للوضع الداكن/الفاتح هو data-theme على <html> —
+  // لا يوجد وضع ليلي مستقل ولا prefers-color-scheme يتجاوز الثيم.
+  r.dataset.theme = t.id;
+  r.classList.toggle("dark", t.dark); // للتوافق فقط
   r.style.setProperty("--bg", v.bg);
   r.style.setProperty("--surface", v.surface);
   r.style.setProperty("--surface-2", v.surface2);
@@ -120,7 +123,6 @@ export function applyTheme(id: string) {
   r.style.setProperty("--ok", v.ok);
   r.style.setProperty("--shadow-1", v.shadow1);
   r.style.setProperty("--shadow-2", v.shadow2);
-  r.dataset.theme = t.id;
   r.style.colorScheme = t.dark ? "dark" : "light";
   return t;
 }
