@@ -67,19 +67,19 @@ export default function SpeedChart({ history }: { history: Sample[] }) {
       style={{ background: "var(--surface)", borderColor: "var(--border)" }}
       aria-label="رسم بياني حي للسرعة"
     >
-      <div className="flex items-center gap-3 mb-1 text-[12px]">
+      <div className="flex items-center gap-3 mb-1 text-[12px] whitespace-nowrap min-w-0 overflow-hidden">
         <Activity size={15} style={{ color: "var(--color-accent)" }} />
-        <span className="flex items-center gap-1.5">
+        <span className="flex items-center gap-1.5 shrink-0">
           <Gauge size={13} style={{ color: "var(--muted)" }} />
-          <span style={{ color: "var(--muted)" }}>الحالية</span>
+          <span className="shrink-0" style={{ color: "var(--muted)" }}>الحالية</span>
           <span className="tabular-nums font-bold" style={{ color: "var(--color-accent)" }}>{formatSpeed(current)}</span>
         </span>
-        <span className="flex items-center gap-1.5">
+        <span className="flex items-center gap-1.5 shrink-0">
           <TrendingUp size={13} style={{ color: "var(--muted)" }} />
-          <span style={{ color: "var(--muted)" }}>المتوسط</span>
+          <span className="shrink-0" style={{ color: "var(--muted)" }}>المتوسط</span>
           <span className="tabular-nums font-semibold" style={{ color: "var(--text)" }}>{formatSpeed(avg)}</span>
         </span>
-        <span className="tabular-nums ms-auto" style={{ color: "var(--muted)" }}>
+        <span className="tabular-nums ms-auto shrink-0 whitespace-nowrap" style={{ color: "var(--muted)" }}>
           الذروة: <b style={{ color: "var(--text)" }}>{formatSpeed(peak)}</b>
         </span>
       </div>

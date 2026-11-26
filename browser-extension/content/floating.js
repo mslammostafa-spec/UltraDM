@@ -258,7 +258,7 @@
     // مثبّتة على documentElement (لا داخل المشغل) حتى لا تختفي عند إعادة
     // بناء شجرة المشغل، وموضعها ديناميكي أسفل يمين المشغل بحجم مضغوط.
     cap.style.cssText =
-      "position:fixed;z-index:2147483646;top:auto;left:auto;right:auto;bottom:auto;";
+      "position:fixed !important;z-index:2147483647 !important;pointer-events:auto !important;top:auto;left:auto;right:auto;bottom:auto;";
     cap.dir = "rtl";
     hydrate(cap);
     cap.innerHTML =
@@ -273,10 +273,10 @@
       setLabel("جارٍ الإرسال…");
       let ok = false;
       try {
-        const res = await chrome.runtime.sendMessage({ type: "ULTRADM_DOWNLOAD", url: window.location.href });
+        const res = await chrome.runtime.sendMessage({ type: "ULTRADM_DOWNLOAD", url: window.location.href, title: document.title });
         ok = !!(res && res.ok);
       } catch { ok = false; }
-      setLabel(ok ? "تم الإرسال ✓" : "افتح UltraDM أولاً");
+      setLabel(ok ? "تم الإرسال لـ UltraDM ✓" : "افتح UltraDM أولاً");
       setTimeout(() => setLabel("تحميل ▾"), 2500);
     });
     document.documentElement.appendChild(cap);

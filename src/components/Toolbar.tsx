@@ -74,7 +74,7 @@ export default function Toolbar({
     <header
       data-tauri-drag-region
       onDoubleClick={() => { if (desktop) apiMax(); }}
-      className="relative z-50 flex items-center gap-2 px-4 h-16 border-b shrink-0 select-none pointer-events-auto"
+      className="relative z-50 flex items-center gap-2 px-4 h-16 border-b shrink-0 select-none pointer-events-auto min-w-0 max-w-full"
       style={{ background: "var(--surface)", borderColor: "var(--border)" }}
     >
       {/* زر X: إنهاء حقيقي للبرنامج (يخرج من التطبيق بالكامل).
@@ -116,12 +116,12 @@ export default function Toolbar({
       <div data-tauri-drag-region="false" className="flex items-center gap-2">
         <ToolbarButton variant="primary" label="إضافة رابط تحميل" onClick={() => { flash("link"); onAddLink(); }}>
           <Link2 size={17} />
-          <span className="hidden min-[1100px]:inline">إضافة رابط</span>
+          <span className="hidden min-[1100px]:inline whitespace-nowrap">إضافة رابط</span>
         </ToolbarButton>
 
         <ToolbarButton variant="torrent" label="إضافة ملف أو رابط تورنت" onClick={() => { flash("torrent"); onAddTorrent(); }}>
           <Magnet size={17} />
-          <span className="hidden min-[1100px]:inline">تورنت</span>
+          <span className="hidden min-[1100px]:inline whitespace-nowrap">تورنت</span>
         </ToolbarButton>
       </div>
 
