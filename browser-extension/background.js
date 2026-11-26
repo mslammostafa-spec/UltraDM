@@ -117,7 +117,7 @@ function connectWs() {
     setStatus("online");
     // اطلب الثيم الحالي من البرنامج ومرّر الإعدادات (فقط عندما تكون القناة OPEN فعلًا).
     if (socket.readyState === WebSocket.OPEN) {
-      socket.send(JSON.stringify({ type: "hello", extension: "ultradm", version: "1.1.3" }));
+      socket.send(JSON.stringify({ type: "hello", extension: "ultradm", version: "1.1.4" }));
     }
   };
   ws.onmessage = (ev) => {
@@ -180,6 +180,8 @@ async function handleCapture(m) {
   if (!enabled) return { ok: false, reason: "disabled" };
   const url = m.url;
   if (!url || !dedupe(url)) return { ok: false, reason: "duplicate" };
+  // حظر نهائي: blob:/mediastream:/data: وملفات النظام الخلفية (.webmanifest/.json/...).
+  if (S.isBlockedUrl(url)) return { ok: false, reason: "blocked-url" };
 
   const payload = {
     type: "capture",
@@ -237,3 +239,26 @@ chrome.storage.local.get(["theme", "enabled"], (s) => {
 });
 
 chrome.runtime.onInstalled.addListener(() => connectWs());
+
+// ==== الالتقاط التلقائي الوحيد: تنزيل حقيقي بدأه المستخدم في المتصفح ====
+// (chrome.downloads.onCreated) — بلا أي webRequest/fetch/XHR interception.
+const DOWNLOAD_EXT_RE =
+  /\.(zip|rar|7z|tar|gz|xz|bz2|iso|exe|msi|dmg|apk|pdf|mp4|mkv|avi|webm|mov|mp3|m4a|flac|wav|aac|ogg|opus|docx?|xlsx?|pptx?|epub|torrent)([?#]|$)/i;
+
+chrome.downloads.onCreated.addListener((item) => {
+  if (!enabled || !item || !item.url) return;
+  const url = item.url.trim();
+  // رفض قاطع: بروتوكولات داخلية وملفات نظام/صفحات.
+  if (S.isBlockedUrl(url)) return;
+  if (/^(https?:)/i.test(url) === false) return;
+  if (!DOWNLOAD_EXT_RE.test(url)) return;
+  // الحجم غير المعروف (-1) يظهر غالبًا في البث — اقبله إن كان بالامتداد المسموح.
+  handleCapture({
+    type: "capture",
+    kind: "direct",
+    url,
+    pageUrl: item.referrer && /^https?:/i.test(item.referrer) ? item.referrer : item.url,
+    userAgent: "",
+    source: "downloads-api",
+  }).catch(() => {});
+});

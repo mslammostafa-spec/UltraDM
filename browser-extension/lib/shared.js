@@ -24,6 +24,15 @@
     STREAM_QUERY_RE:
       /(m3u8|mpd|\.mp4|\.webm|\.mp3|\.aac|type=video|type=audio|mime=video|mime=audio)/i,
 
+    // روابط ممنوعة نهائيًا من الالتقاط: blobs وملفات النظام الخلفية.
+    BLOCKED_URL_RE: /^(blob:|mediastream:|data:)/i,
+    BLOCKED_EXT_RE: /\.(webmanifest|json|js|mjs|css|html?|xml|woff2?|ttf|ts)([?#]|$)/i,
+
+    isBlockedUrl(u) {
+      if (typeof u !== "string") return true;
+      return shared.BLOCKED_URL_RE.test(u.trim()) || shared.BLOCKED_EXT_RE.test(u.trim());
+    },
+
     isMagnet(u) {
       return typeof u === "string" && u.toLowerCase().startsWith("magnet:?");
     },

@@ -63,6 +63,15 @@ export function DownloadInfoDialog({
   const [probeErr, setProbeErr] = useState<string | null>(null);
   const [tools, setTools] = useState<{ ytdlp: boolean; ffmpeg: boolean } | null>(null);
   const [fmt, setFmt] = useState<string>("best");
+  // قائمة جودة سريعة (يوتيوب/فيديو) قبل التحليل — تُمرَّر فعليًا إلى yt-dlp.
+  const YT_QUICK = [
+    { label: "فيديو 1080p (Full HD - MP4)", id: "bestvideo[height<=1080][vcodec^=avc1]+bestaudio[acodec^=mp4a]/best[height<=1080]", audio: false },
+    { label: "فيديو 720p (HD - MP4)", id: "bestvideo[height<=720][vcodec^=avc1]+bestaudio[acodec^=mp4a]/best[height<=720]", audio: false },
+    { label: "فيديو 480p (SD - MP4)", id: "bestvideo[height<=480][vcodec^=avc1]+bestaudio[acodec^=mp4a]/best[height<=480]", audio: false },
+    { label: "فيديو 360p (MP4)", id: "bestvideo[height<=360][vcodec^=avc1]+bestaudio[acodec^=mp4a]/best[height<=360]", audio: false },
+    { label: "صوت فقط (MP3 / M4A)", id: "bestaudio", audio: true },
+  ];
+  const [quickQ, setQuickQ] = useState<string>(YT_QUICK[0].id);
   const [container, setContainer] = useState("mp4");
   const [audioOnly, setAudioOnly] = useState(false);
   const [audioBitrate, setAudioBitrate] = useState("320K");
@@ -96,7 +105,6 @@ export function DownloadInfoDialog({
   };
 
   const startMedia = async () => {
-    if (!media) return;
     try {
       await mediaDownload({
         url: url.trim(),
@@ -109,6 +117,27 @@ export function DownloadInfoDialog({
         subs_langs: subsMode !== "none" && subLangs.length ? subLangs : null,
         subs_auto: subsAuto,
         subs_mode: subsMode,
+      });
+    } catch {
+      // يظهر الخطأ في حدث التقدم
+    }
+  };
+
+  // بدء سريع من القائمة المنسدلة (قبل تحليل الجودات).
+  const startQuick = async () => {
+    const q = YT_QUICK.find((x) => x.id === quickQ) ?? YT_QUICK[0];
+    try {
+      await mediaDownload({
+        url: url.trim(),
+        output_dir: savePath.trim() || defaultPathFor(category),
+        format_id: q.audio ? "bestaudio" : q.id,
+        container: q.audio ? "mp3" : "mp4",
+        audio_only: q.audio,
+        audio_bitrate: q.audio ? "320K" : null,
+        audio_langs: null,
+        subs_langs: null,
+        subs_auto: false,
+        subs_mode: "none",
       });
     } catch {
       // يظهر الخطأ في حدث التقدم
@@ -169,6 +198,24 @@ export function DownloadInfoDialog({
       <div className="my-4">
         <ThreadsPicker value={threads} onChange={setThreads} />
       </div>
+
+      {looksMedia && (
+        <Field label="جودة سريعة (يوتيوب / فيديو)">
+          <div className="flex items-center gap-2">
+            <select value={quickQ} onChange={(e) => setQuickQ(e.target.value)} dir="rtl"
+                    className="flex-1 bg-transparent outline-none text-[13px] cursor-pointer" style={{ color: "var(--text)" }}>
+              {YT_QUICK.map((q) => (
+                <option key={q.id} value={q.id} style={{ color: "#111" }}>{q.label}</option>
+              ))}
+            </select>
+            <button onClick={startQuick} aria-label="تحميل بالجودة المختارة"
+                    className="h-9 px-3 rounded-xl font-bold text-[12px] cursor-pointer hover:brightness-105 shrink-0"
+                    style={{ background: "var(--color-accent)", color: "#06231a" }}>
+              تحميل الآن
+            </button>
+          </div>
+        </Field>
+      )}
 
       {looksMedia && (
         <div className="rounded-2xl border p-4 mb-4" style={{ borderColor: "var(--border)", background: "var(--surface-2)" }}>

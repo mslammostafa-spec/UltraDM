@@ -196,6 +196,67 @@ fn app_info() -> AppInfo {
     }
 }
 
+/// بيانات معلّقة لنوافذ المساعدة (المعلومات/التقدّم).
+#[derive(Clone, serde::Serialize)]
+pub struct AuxPayload {
+    pub kind: String,
+    pub url: Option<String>,
+    pub torrent: Option<bool>,
+    pub download: Option<serde_json::Value>,
+}
+
+static AUX_PENDING: std::sync::Mutex<AuxPayload> = std::sync::Mutex::new(AuxPayload {
+    kind: String::new(),
+    url: None,
+    torrent: None,
+    download: None,
+});
+
+/// نافذة مساعدة جاهزة: أعد بياناتها المعلّقة (إن وُجدت) ثم امسحها.
+#[tauri::command]
+fn aux_ready(kind: String) -> Option<AuxPayload> {
+    let mut p = AUX_PENDING.lock().unwrap_or_else(|e| e.into_inner());
+    if p.kind == kind {
+        Some(std::mem::replace(
+            &mut *p,
+            AuxPayload { kind: String::new(), url: None, torrent: None, download: None },
+        ))
+    } else {
+        None
+    }
+}
+
+/// إضافة تحميل من نافذة المساعدة المستقلة (معلومات التحميل).
+#[tauri::command]
+async fn add_download_from_aux(
+    app: tauri::AppHandle,
+    state: tauri::State<'_, download::EngineHandle>,
+    cfg: serde_json::Value,
+) -> Result<download::DownloadSnapshot, String> {
+    let url = cfg
+        .get("url")
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| "رابط مفقود".to_string())?
+        .to_string();
+    // رفض قاطع للروابط الداخلية (blob:/data:) بعبارة عربية واضحة.
+    let lower = url.trim().to_lowercase();
+    if lower.starts_with("blob:") || lower.starts_with("data:") {
+        return Err(
+            "لا يمكن تحميل روابط blob الداخلية — افتح الرابط الأصلي للملف وأعد المحاولة".into(),
+        );
+    }
+    download::engine_add(
+        app,
+        state,
+        url,
+        cfg.get("savePath").and_then(|v| v.as_str()).unwrap_or("").to_string(),
+        cfg.get("threads").and_then(|v| v.as_u64()).unwrap_or(8) as u32,
+        cfg.get("category").and_then(|v| v.as_str()).unwrap_or("software").to_string(),
+        cfg.get("description").and_then(|v| v.as_str()).map(|s| s.to_string()),
+    )
+    .await
+}
+
 /// أولوية منخفضة للعملية على ويندوز (تحت المعيار) حتى لا يبطئ الإقلاع الصامت النظام.
 #[cfg(target_os = "windows")]
 fn lower_process_priority() {
@@ -337,6 +398,8 @@ pub fn run() {
             sleep_device,
             exit_app,
             app_info,
+            aux_ready,
+            add_download_from_aux,
             download::engine_add,
             download::engine_pause,
             download::engine_resume,

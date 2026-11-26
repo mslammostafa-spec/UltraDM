@@ -1,6 +1,6 @@
-// UltraDM — صائد الروابط ومراقب الشبكة داخل الصفحة.
-// يلتقط: روابط التحميل المباشر، Magnet/.torrent، وأي بث فيديو/صوت
-// (MP4, WebM, M3U8, MPD, MP3, AAC) حتى داخل المشغلات المخفية.
+// UltraDM — الالتقاط داخل الصفحة (بدءًا من v1.1.4: بلا أي اعتراض تلقائي).
+// الإرسال التلقائي محظور تمامًا؛ الوحيد الملتقط عند النقر هو روابط
+// Magnet و.torrent (نية تحميل صريحة). يوتيوب يُرسل رابط الصفحة الحقيقي دائمًا.
 (function () {
   "use strict";
   const S = self.UltraDMShared;
@@ -8,12 +8,18 @@
   window.__ultradm_capture = true;
 
   const seen = new Set();
-  const foundMedia = new Map(); // url -> {url, kind, size}
+  const foundMedia = new Map(); // url -> {url, kind} (للعرض في البوب-أب فقط)
 
-  let send = function (kind, url) {
+  function send(kind, url) {
+    if (!url || typeof url !== "string") return;
+    url = url.trim();
+    // حظر نهائي: blob:/mediastream:/data: وملفات النظام الخلفية.
+    if (S.isBlockedUrl(url)) return;
+    // يوتيوب: أرسل رابط صفحة الفيديو الحقيقي بدلًا من أي مصدر داخلي.
+    const yt = youtubeUrl();
+    if (yt) url = yt;
     if (seen.has(url)) return;
     seen.add(url);
-    // حد أقصى للذاكرة
     if (seen.size > 500) seen.delete(seen.values().next().value);
     chrome.runtime.sendMessage({
       type: "capture",
@@ -23,55 +29,18 @@
       userAgent: navigator.userAgent,
       source: "content",
     }).catch(() => {});
-  };
-
-  function inspectUrl(rawUrl, source) {
-    if (!rawUrl || typeof rawUrl !== "string") return;
-    const url = rawUrl.trim();
-    if (S.isTorrentish(url)) send("torrent", url);
-    else if (S.isStreamMedia(url)) send("stream", url);
-    else if (S.isDirectDownload(url)) send("direct", url);
   }
 
-  // ==== 1) مراقب حركة الشبكة (PerformanceObserver) — يرى البث المخفي ====
-  try {
-    const obs = new PerformanceObserver((list) => {
-      for (const e of list.getEntries()) inspectUrl(e.name, "network");
-    });
-    obs.observe({ type: "resource", buffered: true });
-  } catch { /* متصفح قديم */ }
-
-  // ==== 2) webRequest في الخلفية لا يرى الأجسام؛ هنا نتتبع الوسائط الحية ====
-  function scanMediaElements(root) {
-    const els = (root || document).querySelectorAll(
-      "video, audio, source, track",
+  // رابط صفحة فيديو يوتيوب الحقيقي إن كانت الصفحة يوتيوب.
+  function youtubeUrl() {
+    const m = location.href.match(
+      /(?:youtube\.com\/(?:watch\?.*?v=|shorts\/)|youtu\.be\/)([\w-]{11})/i,
     );
-    els.forEach((el) => {
-      if (el.src) inspectUrl(el.src, "element");
-      if (el.currentSrc) inspectUrl(el.currentSrc, "element");
-    });
+    if (!m) return null;
+    return "https://www.youtube.com/watch?v=" + m[1];
   }
 
-  // ==== 3) اعتراض XHR/fetch المشفّرة في المشغلات ====
-  try {
-    const rawOpen = XMLHttpRequest.prototype.open;
-    XMLHttpRequest.prototype.open = function (method, url, ...rest) {
-      if (typeof url === "string") inspectUrl(url, "xhr");
-      return rawOpen.call(this, method, url, ...rest);
-    };
-    const rawFetch = window.fetch;
-    if (rawFetch) {
-      window.fetch = function (input, init) {
-        try {
-          if (typeof input === "string") inspectUrl(input, "fetch");
-          else if (input && input.url) inspectUrl(input.url, "fetch");
-        } catch { /* تجاهل */ }
-        return rawFetch.call(this, input, init);
-      };
-    }
-  } catch { /* صفحات محمية (يوتيوب تُراعي isolated world) */ }
-
-  // ==== 4) النقر على روابط Magnet/.torrent والروابط المباشرة ====
+  // ==== الالتقاط الوحيد: نقر صريح على Magnet / .torrent ====
   document.addEventListener(
     "click",
     (ev) => {
@@ -81,37 +50,28 @@
       if (S.isTorrentish(href)) {
         ev.preventDefault();
         send("torrent", href);
-      } else if (S.isDirectDownload(href)) {
-        send("direct", href);
       }
     },
     true,
   );
 
-  // ==== 5) قائمة السياق عبر مراقبة النقر بزر الفأرة الأيمن على الوسائط ====
-  document.addEventListener(
-    "mousedown",
-    (ev) => {
-      const t = ev.target;
-      if (t && (t.tagName === "VIDEO" || t.tagName === "AUDIO") && t.currentSrc) {
-        send("media", t.currentSrc);
-      }
-    },
-    true,
-  );
+  // ==== تسجيل الوسائط الحية للبوب-أب فقط (بلا أي إرسال) ====
+  function registerMedia(root) {
+    (root || document).querySelectorAll("video, audio, source").forEach((el) => {
+      const src = el.currentSrc || el.src;
+      if (!src || S.isBlockedUrl(src)) return;
+      foundMedia.set(src, { url: src, kind: "media" });
+    });
+  }
 
-  // ==== 6) مسح دوري خفيف لعناصر الوسائط الجديدة ====
   new MutationObserver((muts) => {
     for (const m of muts) {
       m.addedNodes && m.addedNodes.forEach((n) => {
-        if (n.nodeType === 1) {
-          if (/^(VIDEO|AUDIO|SOURCE)$/.test(n.tagName)) scanMediaElements(n.parentElement);
-          else if (n.querySelectorAll) scanMediaElements(n);
-        }
+        if (n.nodeType === 1) registerMedia(n.parentElement);
       });
     }
   }).observe(document.documentElement, { childList: true, subtree: true });
-  scanMediaElements(document);
+  registerMedia(document);
 
   // ==== استجابة للبوب-أب: قائمة الوسائط المكتشفة في هذا التبويب ====
   chrome.runtime.onMessage.addListener((m, _s, respond) => {
@@ -121,10 +81,7 @@
     return false;
   });
 
-  // تسجيل الوسائط في خريطة العرض
-  const origSend = send;
-  send = function (kind, url) {
-    if (kind === "stream" || kind === "media") foundMedia.set(url, { url, kind });
-    origSend(kind, url);
-  };
+  // للبوب-أب والزر العائم: إرسال صريح عند طلب المستخدم.
+  window.__ultradm_send = send;
+  window.__ultradm_youtube_url = youtubeUrl;
 })();

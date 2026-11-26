@@ -108,6 +108,18 @@ export default function App() {
     setSettingsOpen(false);
   };
 
+  // فتح "معلومات التحميل" في نافذة مستقلة على سطح المكتب (فوق المتصفح)؛
+  // وفي المعاينة الويبية تبقى داخل النافذة الرئيسية.
+  const openInfo = (url: string, torrent: boolean) => {
+    if (!PREVIEW) {
+      import("./lib/auxWindows")
+        .then(({ openAuxWindow }) => openAuxWindow("info", { url, torrent }))
+        .catch(() => setInfo({ url, torrent }));
+      return;
+    }
+    setInfo({ url, torrent });
+  };
+
   // سطح المكتب: تقدّم لحظي من محرك Rust عبر حدث download://progress.
   useEffect(() => {
     if (PREVIEW) return;
@@ -133,12 +145,12 @@ export default function App() {
         });
       });
       const p2 = listen<string>("clipboard://link", (e) => {
-        setInfo({ url: e.payload, torrent: e.payload.startsWith("magnet:?") });
+        openInfo(e.payload, e.payload.startsWith("magnet:?"));
       });
       // التقطت إضافة المتصفح رابطًا: افتح نافذة "معلومات التحميل" فورًا.
       const p3 = listen<{ url: string; kind?: string | null }>("extension://capture", (e) => {
         const u = e.payload.url;
-        setInfo({ url: u, torrent: u.startsWith("magnet:?") || /\.torrent([?#]|$)/i.test(u) });
+        openInfo(u, u.startsWith("magnet:?") || /\.torrent([?#]|$)/i.test(u));
       });
       Promise.all([p1, p2, p3]).then(([u1, u2, u3]) => {
         un = () => {
@@ -367,7 +379,7 @@ export default function App() {
   };
 
   return (
-    <div className="h-full flex" style={{ background: "var(--bg)" }}>
+    <div className="h-full flex min-w-0 overflow-x-hidden" style={{ background: "var(--bg)" }}>
       {/* على الشاشات الصغيرة يصبح الشريط الجانبي منزلاً يُفتح من زر عائم */}
       <div className="max-lg:hidden">
         <Sidebar
@@ -405,8 +417,8 @@ export default function App() {
         <Toolbar
           dark={dark}
           onToggleTheme={() => setDark((d) => !d)}
-          onAddLink={() => setInfo({ url: "", torrent: false })}
-          onAddTorrent={() => setInfo({ url: "", torrent: true })}
+          onAddLink={() => openInfo("", false)}
+          onAddTorrent={() => openInfo("", true)}
           onScheduler={() => setDialog("scheduler")}
           onPause={pauseSelected}
           onResume={inTrash ? restoreSel : resumeSelected}
@@ -525,6 +537,8 @@ export default function App() {
           onLater={(cfg) => addDownload(cfg, true, info.torrent)}
         />
       )}
+      {/* النسخة المكتبية: نافذة مستقلة تظهر فوق المتصفح — لا يوجد ما يُعرض هنا. */}
+      {info && !PREVIEW && null}
       {progressDownload && (
         <DownloadProgressDialog
           download={progressDownload}

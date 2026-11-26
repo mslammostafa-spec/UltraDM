@@ -904,6 +904,14 @@ pub async fn engine_add(
     description: Option<String>,
 ) -> Result<DownloadSnapshot, String> {
     let url = url.trim().to_string();
+    // رفض قاطع للروابط الداخلية وملفات النظام الخلفية، برسالة عربية واضحة.
+    let lower = url.to_lowercase();
+    if lower.starts_with("blob:") || lower.starts_with("data:") || lower.starts_with("mediastream:") {
+        return Err("لا يمكن تحميل روابط blob الداخلية — افتح الرابط الأصلي للملف وأعد المحاولة".into());
+    }
+    if lower.ends_with(".webmanifest") || lower.contains(".webmanifest?") || lower.contains(".webmanifest#") {
+        return Err("لا يمكن تحميل ملفات webmanifest — هذه ملفات نظام للمواقع وليست ملفات تحميل".into());
+    }
     if !url.starts_with("http://") && !url.starts_with("https://") {
         return Err("الرابط يجب أن يكون http/https".into());
     }

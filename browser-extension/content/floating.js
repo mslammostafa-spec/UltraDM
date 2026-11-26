@@ -255,6 +255,52 @@
       });
   }
 
+  // ——— كبسولة يوتيوب الزجاجية (الزاوية العلوية اليسرى للمشغل) ———
+  const YT_QUALITIES = [
+    { label: "فيديو 1080p (Full HD - MP4)", id: "bestvideo[height<=1080][vcodec^=avc1]+bestaudio[acodec^=mp4a]/best[height<=1080]" },
+    { label: "فيديو 720p (HD - MP4)", id: "bestvideo[height<=720][vcodec^=avc1]+bestaudio[acodec^=mp4a]/best[height<=720]" },
+    { label: "فيديو 480p (SD - MP4)", id: "bestvideo[height<=480][vcodec^=avc1]+bestaudio[acodec^=mp4a]/best[height<=480]" },
+    { label: "فيديو 360p (MP4)", id: "bestvideo[height<=360][vcodec^=avc1]+bestaudio[acodec^=mp4a]/best[height<=360]" },
+    { label: "صوت فقط (MP3 / M4A)", audioOnly: true, audioFormat: "mp3" },
+  ];
+
+  function ytPageUrl() {
+    const m = location.href.match(/(?:youtube\.com\/(?:watch\?.*v=|shorts\/)|youtu\.be\/)([\w-]{11})/i);
+    return m ? "https://www.youtube.com/watch?v=" + m[1] : null;
+  }
+
+  function ytCapsule(player) {
+    if (!player || player.querySelector(":scope > .ultradm-yt-capsule")) return;
+    const url = ytPageUrl();
+    if (!url) return;
+    const cap = document.createElement("button");
+    cap.type = "button";
+    cap.className = "ultradm-fab ultradm-yt-capsule";
+    cap.style.cssText = "position:absolute;top:12px;left:12px;z-index:2147483646;";
+    cap.dir = "rtl";
+    hydrate(cap);
+    cap.innerHTML = HEX_SVG + '<span class="ultradm-fab-label">تحميل عبر UltraDM ▾</span>';
+    cap.addEventListener("click", async (ev) => {
+      ev.preventDefault();
+      ev.stopPropagation();
+      cap.classList.add("loading");
+      const probed = await probeFormats(url);
+      cap.classList.remove("loading");
+      const formats = probed && Array.isArray(probed.formats) && probed.formats.length
+        ? probed.formats
+        : YT_QUALITIES.map((q) => ({ label: q.label, id: q.audioOnly ? "bestaudio" : q.id, audioOnly: q.audioOnly, audioFormat: q.audioFormat, ext: q.audioOnly ? "mp3/m4a" : "mp4" }));
+      buildMenu(cap, probed && probed.title, formats, url, cap);
+    });
+    player.appendChild(cap);
+  }
+
+  const attachYt = () => {
+    const yt = document.querySelector("#movie_player, ytd-player, .html5-video-player");
+    if (yt) ytCapsule(yt);
+  };
+  const prevAttach = attach;
+  attach = function () { prevAttach(); attachYt(); };
+
   const mo = new MutationObserver(() => attach());
   mo.observe(document.documentElement, { childList: true, subtree: true });
   attach();
