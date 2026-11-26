@@ -99,22 +99,38 @@ function applyTheme(t) {
 
 function connectWs() {
   if (!enabled) return;
+  // أغلق أي اتصال سابق أولًا لمنع تداخل الاتصالات.
+  if (ws) {
+    try { ws.close(); } catch { /* قد يكون مغلقاً بالفعل */ }
+    ws = null;
+  }
+  let socket;
   try {
-    ws = new WebSocket(S.WS_URL);
+    socket = new WebSocket(S.WS_URL);
   } catch {
     scheduleReconnect();
     return;
   }
-  ws.onopen = () => {
+  ws = socket;
+  socket.onopen = () => {
     wsReady = true;
     setStatus("online");
-    // اطلب الثيم الحالي من البرنامج ومرّر الإعدادات.
-    ws.send(JSON.stringify({ type: "hello", extension: "ultradm", version: "1.0.0" }));
+    // اطلب الثيم الحالي من البرنامج ومرّر الإعدادات (فقط عندما تكون القناة OPEN فعلًا).
+    if (socket.readyState === WebSocket.OPEN) {
+      socket.send(JSON.stringify({ type: "hello", extension: "ultradm", version: "1.1.3" }));
+    }
   };
   ws.onmessage = (ev) => {
     try {
       const msg = JSON.parse(ev.data);
-      if (msg.type === "theme") applyTheme(msg);
+      if (msg.type === "theme") {
+        // Service Worker بلا DOM: لا تُطبّق الثيم هنا — احفظه في
+        // chrome.storage.local ومرّره للتبويبات بأمان.
+        const acc = S.THEME_ACCENTS[msg.id] || S.THEME_ACCENTS["glass-emerald-cyan"];
+        theme = { id: msg.id, accent: acc.accent, glow: acc.glow };
+        chrome.storage.local.set({ ultradmTheme: msg });
+        broadcast({ type: "ultradm://theme", theme });
+      }
       if (msg.type === "pong") return;
       if (msg.type === "captured" && msg.url) {
         chrome.notifications.create({
