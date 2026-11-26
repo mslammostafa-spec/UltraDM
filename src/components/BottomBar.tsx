@@ -1,5 +1,4 @@
 import { Power, MoonStar, LogOut, ShieldCheck, X } from "lucide-react";
-import { invoke } from "@tauri-apps/api/core";
 import type { AfterFinish } from "../lib/ipc";
 
 const OPTIONS: Array<{
@@ -81,17 +80,6 @@ export default function BottomBar({
           {message}
         </span>
       )}
-      <div className="flex items-center gap-2">
-        <button
-          onClick={async () => {
-            try { await invoke("quit_app"); } catch { /* ... */ }
-          }}
-          className="flex items-center gap-1.5 h-9 px-3 rounded-xl text-[12.5px] font-bold transition-all duration-150 hover:bg-[#e5484d22] hover:text-[#e5484d] cursor-pointer"
-        >
-          <LogOut size={15} />
-          إغلاق البرنامج
-        </button>
-      </div>
     </footer>
   );
 }

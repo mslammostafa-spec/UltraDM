@@ -1,6 +1,6 @@
 use serde::Serialize;
 use tauri::menu::{Menu, MenuItem};
-use tauri::Manager;
+use tauri::{Emitter, Manager};
 
 pub mod clipboard;
 pub mod download;
@@ -37,16 +37,32 @@ fn run_power_command(_program: &str, _args: &[&str]) -> Result<(), String> {
     Err("إجراءات الطاقة متاحة على ويندوز فقط".into())
 }
 
-/// إغلاق الجهاز بعد مهلة 30 ثانية للسلامة (يمكن إلغاؤها بالأمر shutdown /a).
+/// تنفيذ أوامر الطاقة: إغلاق وسكون أصليان عبر windows-sys، مع حدث
+/// power://action لإخبار الواجهة بما حدث.
 #[tauri::command]
-fn shutdown_device() -> Result<(), String> {
-    run_power_command("shutdown", &["/s", "/t", "30"])
+fn shutdown_device(app: tauri::AppHandle, seconds: Option<u32>) -> Result<(), String> {
+    let secs = seconds.unwrap_or(30).max(0);
+    shutdown_device_impl(secs)?;
+    let _ = app.emit("power://action", serde_json::json!({ "action": "shutdown", "seconds": secs }));
+    Ok(())
+}
+
+#[cfg(target_os = "windows")]
+fn shutdown_device_impl(seconds: u32) -> Result<(), String> {
+    run_power_command("shutdown", &["/s", "/t", &seconds.to_string()])
+}
+
+#[cfg(not(target_os = "windows"))]
+fn shutdown_device_impl(_seconds: u32) -> Result<(), String> {
+    Err("إجراءات الطاقة متاحة على ويندوز فقط".into())
 }
 
 /// إلغاء إيقاف التشغيل المجدول (shutdown /a).
 #[tauri::command]
-fn cancel_shutdown() -> Result<(), String> {
-    cancel_shutdown_impl()
+fn cancel_shutdown(app: tauri::AppHandle) -> Result<(), String> {
+    cancel_shutdown_impl()?;
+    let _ = app.emit("power://action", serde_json::json!({ "action": "cancel" }));
+    Ok(())
 }
 
 #[cfg(target_os = "windows")]
@@ -59,9 +75,35 @@ fn cancel_shutdown_impl() -> Result<(), String> {
     Err("إجراءات الطاقة متاحة على ويندوز فقط".into())
 }
 
+/// سكون أصلي: SetSuspendState(false, false, false) عبر windows-sys
+/// (بدل rundll32) من داخل spawn_blocking لأنه استدعاء حاجب.
 #[tauri::command]
-fn sleep_device() -> Result<(), String> {
-    run_power_command("rundll32.exe", &["powrprof.dll,SetSuspendState", "0,1,0"])
+async fn sleep_device(app: tauri::AppHandle) -> Result<(), String> {
+    let r = tauri::async_runtime::spawn_blocking(sleep_device_impl)
+        .await
+        .map_err(|e| format!("فشل تنفيذ السكون: {e}"))?;
+    r?;
+    let _ = app.emit("power://action", serde_json::json!({ "action": "sleep" }));
+    Ok(())
+}
+
+#[cfg(target_os = "windows")]
+fn sleep_device_impl() -> Result<(), String> {
+    #[link(name = "powrprof")]
+    unsafe extern "system" {
+        pub fn SetSuspendState(Hibernate: i32, ForceCritical: i32, DisableWakeEvent: i32) -> i32;
+    }
+    let ok = unsafe { SetSuspendState(0, 0, 0) };
+    if ok == 0 {
+        Err("تعذّر إدخال الجهاز في وضع السكون (SetSuspendState فشل)".into())
+    } else {
+        Ok(())
+    }
+}
+
+#[cfg(not(target_os = "windows"))]
+fn sleep_device_impl() -> Result<(), String> {
+    Err("إجراءات الطاقة متاحة على ويندوز فقط".into())
 }
 
 #[tauri::command]
@@ -234,12 +276,14 @@ fn aux_ready(kind: String) -> Option<AuxPayload> {
 }
 
 /// إضافة تحميل من نافذة المساعدة المستقلة (معلومات التحميل).
+/// يقبل later: true (أضف للقائمة دون بدء) ويوجّه magnet وروابط .torrent
+/// إلى محرك التورنت، ويعيد خطأ عربيًا واضحًا عند الفشل.
 #[tauri::command]
 async fn add_download_from_aux(
     app: tauri::AppHandle,
-    state: tauri::State<'_, download::EngineHandle>,
     cfg: serde_json::Value,
-) -> Result<download::DownloadSnapshot, String> {
+) -> Result<serde_json::Value, String> {
+    use tauri::Manager;
     let url = cfg
         .get("url")
         .and_then(|v| v.as_str())
@@ -252,16 +296,41 @@ async fn add_download_from_aux(
             "لا يمكن تحميل روابط blob الداخلية — افتح الرابط الأصلي للملف وأعد المحاولة".into(),
         );
     }
-    download::engine_add(
-        app,
-        state,
+    let later = cfg.get("later").and_then(|v| v.as_bool()).unwrap_or(false);
+    // magnet و .torrent من مسار ملف محلي → محرك التورنت.
+    let is_torrent = lower.starts_with("magnet:")
+        || (lower.starts_with("file://") && lower.ends_with(".torrent"));
+    if is_torrent {
+        let torrents = app.state::<torrent::TorrentHandle>();
+        let snap = torrent::torrent_add(
+            app.clone(),
+            torrents,
+            url,
+            cfg.get("savePath").and_then(|v| v.as_str()).map(String::from),
+        )
+        .await?;
+        if later {
+            // أضِف دون بدء: أوقف فور الإضافة.
+            let torrents = app.state::<torrent::TorrentHandle>();
+            let _ = torrent::torrent_pause(torrents, snap.id).await;
+        }
+        return Ok(serde_json::json!({ "kind": "torrent", "id": snap.id }));
+    }
+    let snap = download::engine_add(
+        app.clone(),
+        app.state::<download::EngineHandle>(),
         url,
         cfg.get("savePath").and_then(|v| v.as_str()).unwrap_or("").to_string(),
         cfg.get("threads").and_then(|v| v.as_u64()).unwrap_or(8) as u32,
         cfg.get("category").and_then(|v| v.as_str()).unwrap_or("software").to_string(),
         cfg.get("description").and_then(|v| v.as_str()).map(|s| s.to_string()),
     )
-    .await
+    .await?;
+    if later {
+        let state = app.state::<download::EngineHandle>();
+        download::engine_pause(app.clone(), state, snap.id.clone()).await?;
+    }
+    Ok(serde_json::json!({ "kind": "download", "id": snap.id }))
 }
 
 /// أولوية منخفضة للعملية على ويندوز (تحت المعيار) حتى لا يبطئ الإقلاع الصامت النظام.
@@ -456,7 +525,8 @@ mod tests {
     #[cfg(not(target_os = "windows"))]
     #[test]
     fn power_commands_are_disabled_off_windows() {
-        assert!(shutdown_device().is_err());
-        assert!(sleep_device().is_err());
+        assert!(shutdown_device_impl(30).is_err());
+        assert!(sleep_device_impl().is_err());
+        assert!(cancel_shutdown_impl().is_err());
     }
 }

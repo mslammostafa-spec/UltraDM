@@ -206,6 +206,7 @@ impl Engine {
     }
 }
 
+#[derive(Clone)]
 pub struct EngineHandle(pub Arc<Engine>);
 
 fn meta_path(path: &str) -> PathBuf {

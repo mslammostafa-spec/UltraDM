@@ -34,11 +34,11 @@ export default function InfoWindow() {
         isTorrent={!!payload.torrent}
         onClose={close}
         onStart={(cfg: StartConfig) => {
-          invoke("add_download_from_aux", { cfg, later: false }).catch(() => {});
+          invoke("add_download_from_aux", { cfg: { ...cfg, later: false } }).catch(() => {});
           close();
         }}
         onLater={(cfg: StartConfig) => {
-          invoke("add_download_from_aux", { cfg, later: true }).catch(() => {});
+          invoke("add_download_from_aux", { cfg: { ...cfg, later: true } }).catch(() => {});
           close();
         }}
       />

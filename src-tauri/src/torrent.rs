@@ -96,6 +96,7 @@ impl TorrentEngine {
     }
 }
 
+#[derive(Clone)]
 pub struct TorrentHandle(pub Arc<TorrentEngine>);
 
 async fn get_handle(engine: &TorrentEngine, id: u64) -> Result<Arc<librqbit::ManagedTorrent>, String> {
