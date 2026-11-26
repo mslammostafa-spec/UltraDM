@@ -172,7 +172,7 @@ async function connectWs() {
     setStatus("online");
     // اطلب الثيم الحالي من البرنامج ومرّر الإعدادات (فقط عندما تكون القناة OPEN فعلًا).
     if (socket.readyState === WebSocket.OPEN) {
-      socket.send(JSON.stringify({ type: "hello", extension: "ultradm", version: "1.1.14" }));
+      socket.send(JSON.stringify({ type: "hello", extension: "ultradm", version: "1.1.15" }));
     }
   };
   ws.onmessage = (ev) => {

@@ -424,14 +424,14 @@ fn persist_item(item: &DownloadItem, chunks: Vec<ChunkState>, etag: Option<Strin
 
 /// تشغيل مهمة تحميل واحدة لكل خيط مع تتبّع لحظي.
 fn spawn_task(app: AppHandle, engine: Arc<Engine>, id: String) {
-    let item_arc = engine.items.lock().unwrap().get(&id).cloned();
+    let item_arc = engine.items.lock().unwrap_or_else(|p| p.into_inner()).get(&id).cloned();
     let Some(item_arc) = item_arc else { return };
-    let cancel = item_arc.lock().unwrap().cancel.clone();
+    let cancel = item_arc.lock().unwrap_or_else(|p| p.into_inner()).cancel.clone();
 
     tokio::spawn(async move {
         let result = run_download(&app, engine.clone(), &id, &cancel).await;
-        if let Some(item) = engine.items.lock().unwrap().get(&id).cloned() {
-            let mut it = item.lock().unwrap();
+        if let Some(item) = engine.items.lock().unwrap_or_else(|p| p.into_inner()).get(&id).cloned() {
+            let mut it = item.lock().unwrap_or_else(|p| p.into_inner());
             if cancel.is_cancelled() {
                 // إيقاف مؤقت أو حذف: الحالة أُضيفت مسبقًا
             } else {
@@ -510,7 +510,7 @@ impl Sink {
     async fn write(&mut self, offset: u64, data: &[u8]) -> Result<(), String> {
         match self {
             Sink::Ram(buf) => {
-                let mut b = buf.lock().unwrap();
+                let mut b = buf.lock().unwrap_or_else(|p| p.into_inner());
                 let o = offset as usize;
                 if o + data.len() > b.len() {
                     return Err("كتابة خارج حدود مخزن الذاكرة".into());
@@ -538,7 +538,7 @@ impl SharedChunks {
     /// (أكبر عدد بايتات متبقية)، يقسم نصف الذيل المتبقي له إلى جزء جديد
     /// ويضعها في نهاية القائمة، ويعيد فهرسها. ذرّية تحت قفل واحد.
     fn steal_tail(&self, exclude: Option<usize>) -> Option<(usize, u64, u64)> {
-        let mut inner = self.inner.lock().unwrap();
+        let mut inner = self.inner.lock().unwrap_or_else(|p| p.into_inner());
         let mut victim: Option<usize> = None;
         let mut best = MIN_STEAL_BYTES;
         for (i, c) in inner.iter().enumerate() {
@@ -573,9 +573,9 @@ async fn run_download(
     id: &str,
     cancel: &CancellationToken,
 ) -> Result<(), String> {
-    let item_arc = engine.items.lock().unwrap().get(id).cloned().ok_or("غير موجود")?;
+    let item_arc = engine.items.lock().unwrap_or_else(|p| p.into_inner()).get(id).cloned().ok_or("غير موجود")?;
     let (url, path, threads, saved_meta) = {
-        let it = item_arc.lock().unwrap();
+        let it = item_arc.lock().unwrap_or_else(|p| p.into_inner());
         let saved = load_meta(&it.snapshot.file_path);
         (it.snapshot.url.clone(), it.snapshot.file_path.clone(), it.snapshot.threads, saved)
     };
@@ -594,7 +594,7 @@ async fn run_download(
     let chunks = split_chunks(size, threads, Some(&saved_chunks));
     let total_initial: u64 = chunks.iter().map(|c| c.done).sum();
     {
-        let mut it = item_arc.lock().unwrap();
+        let mut it = item_arc.lock().unwrap_or_else(|p| p.into_inner());
         it.snapshot.size = size;
         it.snapshot.threads = threads;
         it.snapshot.downloaded = total_initial;
@@ -606,7 +606,7 @@ async fn run_download(
     // تُكتب على القرص كتابة تسلسلية واحدة عند الاكتمال (دورة كتابة واحدة).
     // إذا تجاوز استهلاك RAM النظام 75% نتراجع تلقائيًا للكتابة على القرص.
     let (ram_first, ram_limit) = {
-        let c = engine.cache.lock().unwrap();
+        let c = engine.cache.lock().unwrap_or_else(|p| p.into_inner());
         (c.ram_first, c.ram_full_limit_bytes)
     };
     let use_ram = ram_first
@@ -650,11 +650,11 @@ async fn run_download(
             if ck_cancel.is_cancelled() {
                 break;
             }
-            let it = ck_item.lock().unwrap();
+            let it = ck_item.lock().unwrap_or_else(|p| p.into_inner());
             if it.cancel.is_cancelled() {
                 break;
             }
-            let chunks = ck_shared.inner.lock().unwrap().clone();
+            let chunks = ck_shared.inner.lock().unwrap_or_else(|p| p.into_inner()).clone();
             let st = PersistedState {
                 url: it.snapshot.url.clone(),
                 size: it.snapshot.size,
@@ -670,7 +670,7 @@ async fn run_download(
 
     let mut handles = Vec::new();
     for idx in 0.. {
-        if idx >= shared.inner.lock().unwrap().len() {
+        if idx >= shared.inner.lock().unwrap_or_else(|p| p.into_inner()).len() {
             break;
         }
         handles.push(tokio::spawn(download_chunk(
@@ -698,15 +698,15 @@ async fn run_download(
     // الذاكرة فورًا. عند الاكتمال يكون الملف جاهزًا للتشغيل بلا أي دمج إضافي.
     if let Some(buf_arc) = &shared.ram {
         // كتابة متزامنة حتى لا يُحتفظ بقفل الذاكرة عبر نقطة انتظار.
-        let buf = buf_arc.lock().unwrap();
+        let buf = buf_arc.lock().unwrap_or_else(|p| p.into_inner());
         std::fs::write(&path, buf.as_slice()).map_err(|e| e.to_string())?;
         drop(buf);
     }
 
     // حفظ حالة الأجزاء على القرص (استئناف حتى بعد إغلاق البرنامج).
     {
-        let it = item_arc.lock().unwrap();
-        let chunks = shared.inner.lock().unwrap().clone();
+        let it = item_arc.lock().unwrap_or_else(|p| p.into_inner());
+        let chunks = shared.inner.lock().unwrap_or_else(|p| p.into_inner()).clone();
         persist_item(&it, chunks, etag, last_modified, accepts_ranges);
     }
 
@@ -744,7 +744,7 @@ async fn download_chunk(
             return Ok(());
         }
         let (start, end, done) = {
-            let chunks = shared.inner.lock().unwrap();
+            let chunks = shared.inner.lock().unwrap_or_else(|p| p.into_inner());
             let c = &chunks[my_idx];
             (c.start, c.end, c.done)
         };
@@ -765,7 +765,9 @@ async fn download_chunk(
             req = req.header("if-range", et);
         }
         let resp = tokio::select! {
-            r = req.send() => r.map_err(|e| e.to_string())?,
+            r = tokio::time::timeout(std::time::Duration::from_secs(20), req.send()) => {
+                r.map_err(|_| "انتهت مهلة بدء الاستجابة".to_string())?.map_err(|e| e.to_string())?
+            }
             _ = cancel.cancelled() => return Ok(()),
         };
         if !resp.status().is_success() {
@@ -785,7 +787,12 @@ async fn download_chunk(
         let mut net_err: Option<String> = None;
 
         while let Some(item_) = tokio::select! {
-            c = stream.next() => c,
+            // مهلة خمول 30 ثانية: خادم يبقي الاتصال مفتوحًا بلا بيانات لا يُنتج
+            // خطأً أبدًا — كانت هذه سبب التوقف عند ~99%. مع المهلة يتحول الخمول
+            // إلى خطأ شبكة ويُعاد الاستئناف من آخر بايت بنطاق Range.
+            c = tokio::time::timeout(std::time::Duration::from_secs(30), stream.next()) => {
+                c.unwrap_or(None)
+            }
             _ = cancel.cancelled() => None,
         } {
             let Ok(bytes) = item_ else {
@@ -801,7 +808,7 @@ async fn download_chunk(
                 }
                 let offset = start + done + written as u64;
                 // إذا سُرق ذيلي أثناء الكتابة (خيط أسرع ساعدني) توقف فوراً.
-                if offset > shared.inner.lock().unwrap()[my_idx].end {
+                if offset > shared.inner.lock().unwrap_or_else(|p| p.into_inner())[my_idx].end {
                     break;
                 }
                 if let Err(e) = sink.write(offset, &bytes[written..written + grant]).await {
@@ -810,7 +817,7 @@ async fn download_chunk(
                 }
                 written += grant;
                 shared.received.fetch_add(grant as u64, Ordering::Relaxed);
-                shared.inner.lock().unwrap()[my_idx].done += grant as u64;
+                shared.inner.lock().unwrap_or_else(|p| p.into_inner())[my_idx].done += grant as u64;
                 maybe_emit(&engine, &item, &shared, &clock).await;
             }
             if net_err.is_some() {
@@ -826,7 +833,7 @@ async fn download_chunk(
             return Err(e);
         }
 
-        let have = shared.inner.lock().unwrap()[my_idx].done;
+        let have = shared.inner.lock().unwrap_or_else(|p| p.into_inner())[my_idx].done;
         if have >= want {
             match shared.steal_tail(Some(my_idx)) {
                 Some((ni, _, _)) => {
@@ -847,7 +854,7 @@ async fn download_chunk(
 /// نبضة كل 250 ملّي ثانية: تحديث السرعة/الوقت المتبقي وإرسال الحدث للواجهة.
 async fn maybe_emit(engine: &Arc<Engine>, item: &Arc<Mutex<DownloadItem>>, shared: &Arc<SharedChunks>, clock: &Arc<Mutex<(u64, std::time::Instant)>>) {
     let (delta, dt, received) = {
-        let mut last = clock.lock().unwrap();
+        let mut last = clock.lock().unwrap_or_else(|p| p.into_inner());
         let now = std::time::Instant::now();
         let elapsed = last.1.elapsed();
         if elapsed < std::time::Duration::from_millis(250) {
@@ -870,9 +877,9 @@ async fn emit_progress(app: &AppHandle, engine: &Arc<Engine>, item_arc: &Arc<Mut
 }
 
 async fn update_snapshot(engine: &Arc<Engine>, item: &Arc<Mutex<DownloadItem>>, shared: &Arc<SharedChunks>, received: u64, speed: f64) {
-    let chunks = shared.inner.lock().unwrap().clone();
+    let chunks = shared.inner.lock().unwrap_or_else(|p| p.into_inner()).clone();
     let snap = {
-        let mut it = item.lock().unwrap();
+        let mut it = item.lock().unwrap_or_else(|p| p.into_inner());
         let s = &mut it.snapshot;
         s.downloaded = received;
         s.progress = if s.size > 0 { received as f64 / s.size as f64 * 100.0 } else { 0.0 };
@@ -918,7 +925,7 @@ pub fn engine_set_cache_config(
     ram_first: bool,
     ram_full_limit_bytes: u64,
 ) {
-    let mut c = state.0.cache.lock().unwrap();
+    let mut c = state.0.cache.lock().unwrap_or_else(|p| p.into_inner());
     c.ram_first = ram_first;
     c.ram_full_limit_bytes = ram_full_limit_bytes.max(512 * 1024 * 1024);
 }
@@ -994,36 +1001,36 @@ pub async fn engine_add(
         snapshot: snapshot.clone(),
         cancel: CancellationToken::new(),
     }));
-    state.0.items.lock().unwrap().insert(id.clone(), item);
+    state.0.items.lock().unwrap_or_else(|p| p.into_inner()).insert(id.clone(), item);
     spawn_task(app, state.0.clone(), id);
     Ok(snapshot)
 }
 
 #[tauri::command]
 pub async fn engine_pause(app: AppHandle, state: State<'_, EngineHandle>, id: String) -> Result<(), String> {
-    let item = state.0.items.lock().unwrap().get(&id).cloned().ok_or("غير موجود")?;
+    let item = state.0.items.lock().unwrap_or_else(|p| p.into_inner()).get(&id).cloned().ok_or("غير موجود")?;
     {
-        let mut it = item.lock().unwrap();
+        let mut it = item.lock().unwrap_or_else(|p| p.into_inner());
         it.cancel.cancel();
         it.snapshot.status = "paused".into();
         it.snapshot.speed_bps = 0.0;
         it.snapshot.eta_seconds = None;
     }
-    let snap = item.lock().unwrap().snapshot.clone();
+    let snap = item.lock().unwrap_or_else(|p| p.into_inner()).snapshot.clone();
     let _ = app.emit("download://progress", &snap);
     Ok(())
 }
 
 #[tauri::command]
 pub async fn engine_resume(app: AppHandle, state: State<'_, EngineHandle>, id: String) -> Result<(), String> {
-    let exists = state.0.items.lock().unwrap().contains_key(&id);
+    let exists = state.0.items.lock().unwrap_or_else(|p| p.into_inner()).contains_key(&id);
     if !exists {
         return Err("غير موجود".into());
     }
     {
-        let items = state.0.items.lock().unwrap();
+        let items = state.0.items.lock().unwrap_or_else(|p| p.into_inner());
         let item = items.get(&id).unwrap();
-        let mut it = item.lock().unwrap();
+        let mut it = item.lock().unwrap_or_else(|p| p.into_inner());
         it.cancel = CancellationToken::new();
         it.snapshot.status = "queued".into();
         it.snapshot.error = None;
@@ -1034,9 +1041,24 @@ pub async fn engine_resume(app: AppHandle, state: State<'_, EngineHandle>, id: S
 
 #[tauri::command]
 pub async fn engine_cancel(state: State<'_, EngineHandle>, id: String) -> Result<(), String> {
-    let removed = state.0.items.lock().unwrap().remove(&id);
+    let removed = state.0.items.lock().unwrap_or_else(|p| p.into_inner()).remove(&id);
     if let Some(item) = removed {
-        item.lock().unwrap().cancel.cancel();
+        let path = {
+            let mut it = item.lock().unwrap_or_else(|p| p.into_inner());
+            it.cancel.cancel();
+            it.snapshot.file_path.clone()
+        };
+        // تنظيف آمن بعد الإلغاء: نحذف الملف الجزئي وملف الـ checkpoint بعد مهلة
+        // قصيرة تُسقط فيها الأجزاء النشطة مقابض ملفاتها (الإلغاء يوقف كل خيوط
+        // التنزيل). أي فشل في الحذف (ملف مقفول على Windows) يُتجاهل بصمت —
+        // لا يُلغي الأمر نفسه ولا يُنهي التطبيق أبداً.
+        // تنظيف آمن بعد الإلغاء: نحذف الملف الجزئي وملف الـ checkpoint بعد مهلة
+        tokio::spawn(async move {
+            tokio::time::sleep(std::time::Duration::from_millis(700)).await;
+            let _ = std::fs::remove_file(std::path::Path::new(&path).with_extension("tmp"));
+            let _ = std::fs::remove_file(meta_path(&path));
+            let _ = std::fs::remove_file(&path);
+        });
     }
     Ok(())
 }
@@ -1049,14 +1071,14 @@ pub fn engine_list(state: State<'_, EngineHandle>) -> Vec<DownloadSnapshot> {
         .lock()
         .unwrap()
         .values()
-        .map(|i| i.lock().unwrap().snapshot.clone())
+        .map(|i| i.lock().unwrap_or_else(|p| p.into_inner()).snapshot.clone())
         .collect()
 }
 
 #[tauri::command]
 pub fn engine_set_threads(state: State<'_, EngineHandle>, id: String, threads: u32) -> Result<(), String> {
-    let item = state.0.items.lock().unwrap().get(&id).cloned().ok_or("غير موجود")?;
-    item.lock().unwrap().snapshot.threads = threads.clamp(1, MAX_THREADS);
+    let item = state.0.items.lock().unwrap_or_else(|p| p.into_inner()).get(&id).cloned().ok_or("غير موجود")?;
+    item.lock().unwrap_or_else(|p| p.into_inner()).snapshot.threads = threads.clamp(1, MAX_THREADS);
     Ok(())
 }
 
@@ -1114,7 +1136,7 @@ mod tests {
         let stolen = shared.steal_tail(None).expect("يجب أن يسرق من الأكبر بقاءً");
         let (idx, s, e) = stolen;
         assert!(idx >= 2);
-        let inner = shared.inner.lock().unwrap();
+        let inner = shared.inner.lock().unwrap_or_else(|p| p.into_inner());
         // الضحية (الأكبر بقاءً: 4MB) تقلّص نهايتها لصالح الجزء الجديد.
         assert_eq!(inner[1].end + 1, s);
         assert_eq!(e, 6 * MIN_STEAL_BYTES - 1);
@@ -1134,7 +1156,7 @@ mod tests {
         };
         // المتبقي 1001، النصف 500 < MIN_STEAL_BYTES ⇒ لا سرقة مجدية
         // (لأن steal_len = rem/2 يجب أن يتجاوز الحد الأدنى)
-        let mut inner = shared.inner.lock().unwrap();
+        let mut inner = shared.inner.lock().unwrap_or_else(|p| p.into_inner());
         inner[0] = ChunkState { start: 0, end: 4 * MIN_STEAL_BYTES - 1, done: 0 };
         drop(inner);
         let stolen = shared.steal_tail(None);
