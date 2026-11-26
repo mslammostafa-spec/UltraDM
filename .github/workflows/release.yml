@@ -1,0 +1,74 @@
+name: Release UltraDM
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            target: x86_64-pc-windows-msvc
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Refresh Tauri plugin versions in Cargo.lock (match package.json stable v2)
+        run: cargo update -p tauri-plugin-autostart -p tauri-plugin-updater -p tauri-plugin-process
+        working-directory: src-tauri
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - uses: swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+
+      - name: Install frontend dependencies
+        run: npm install
+
+      - name: Build browser extension zip (bundled inside installers via tauri resources)
+        if: matrix.target == 'x86_64-pc-windows-msvc'
+        run: node scripts/zip-extension.mjs
+
+      - name: Build Tauri app (NSIS installer)
+        uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          tagName: v__VERSION__
+          releaseName: "UltraDM v__VERSION__"
+          releaseBody: "Free code signing provided by SignPath.io, certificate by SignPath Foundation. حمّل الملف التنفيذي المناسب لمعالجتك (x64 أو ARM64). ملف latest.json مطلوب لتحديثات البرنامج التلقائية."
+          releaseDraft: false
+          prerelease: false
+          args: --target ${{ matrix.target }}
+
+      - name: Build Microsoft Store package (MSIX-ready MSI)
+        if: matrix.target == 'x86_64-pc-windows-msvc'
+        run: |
+          npx tauri build --config src-tauri/tauri.microsoftstore.conf.json --target ${{ matrix.target }}
+          mkdir -p store-package
+          cp src-tauri/target/${{ matrix.target }}/release/bundle/msi/*.msi store-package/UltraDM-Store-x64.msi
+
+      - name: Upload store package and extension zip as artifacts
+        if: matrix.target == 'x86_64-pc-windows-msvc'
+        uses: actions/upload-artifact@v4
+        with:
+          name: microsoft-store-package
+          path: |
+            store-package/UltraDM-Store-x64.msi
+            store-package/UltraDM-Store-x64-signed.msi
+            browser-extension.zip
+          if-no-files-found: ignore

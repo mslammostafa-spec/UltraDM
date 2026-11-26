@@ -1,0 +1,47 @@
+[package]
+name = "ultradm"
+version = "1.1.7"
+description = "UltraDM — Ultra Download Manager"
+authors = ["UltraDM"]
+edition = "2021"
+rust-version = "1.77"
+
+[lib]
+name = "ultradm_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = ["tray-icon"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "fs", "io-util", "sync", "time", "net", "process"] }
+tokio-util = "0.7"
+reqwest = { version = "0.12", default-features = false, features = ["http2", "http3", "rustls-tls", "stream"] }
+futures-util = "0.3"
+arboard = "3"
+uuid = { version = "1", features = ["v4"] }
+librqbit = { version = "9", default-features = true }
+sha2 = "0.10"
+sha1 = "0.10"
+base64 = "0.22"
+hex = "0.4"
+tauri-plugin-autostart = "2"
+tauri-plugin-updater = "2"
+tauri-plugin-process = "2"
+tauri-plugin-single-instance = "2"
+windows-sys = { version = "0.59", features = ["Win32_System_Threading", "Win32_Storage_FileSystem"] }
+dirs = "6"
+
+[target.'cfg(windows)'.dependencies]
+winreg = "0.55"
+windows-sys = { version = "0.59", features = ["Win32_System_SystemInformation"] }
+
+[profile.release]
+opt-level = "z"
+lto = "fat"
+codegen-units = 1
+panic = "abort"
+strip = true

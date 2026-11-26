@@ -1,0 +1,98 @@
+@import "tailwindcss";
+
+@theme {
+  --font-display: "Segoe UI Variable Display", "Segoe UI", "Noto Sans Arabic", system-ui, sans-serif;
+  --font-text: "Segoe UI", "Noto Sans Arabic", system-ui, sans-serif;
+  --color-accent: #3ddc97;
+  --color-accent-strong: #24b97a;
+  --color-torrent: #7aa2ff;
+}
+
+/* الوضع الداكن يُشتق من الثيم فقط عبر data-theme (لا وضع ليلي مستقل) */
+:root {
+  --bg: #f4f7f6;
+  --surface: #ffffff;
+  --surface-2: #eef2f1;
+  --text: #14201c;
+  --muted: #5b6b66;
+  --border: #dfe6e3;
+  --shadow-1: 0 1px 2px rgba(16, 32, 27, 0.06);
+  --shadow-2: 0 12px 32px rgba(16, 32, 27, 0.12);
+  color-scheme: light;
+}
+
+html[data-theme] {
+  --bg: #0b120f;
+  --surface: #111a16;
+  --surface-2: #17231e;
+  --text: #e8f0ec;
+  --muted: #8ba39a;
+  --border: #223029;
+  --shadow-1: 0 1px 2px rgba(0, 0, 0, 0.4);
+  --shadow-2: 0 12px 32px rgba(0, 0, 0, 0.5);
+  color-scheme: dark;
+}
+
+html[data-theme="glass-rose-blush"] {
+  --bg: #f4f7f6;
+  --surface: #ffffff;
+  --surface-2: #eef2f1;
+  --text: #14201c;
+  --muted: #5b6b66;
+  --border: #dfe6e3;
+  --shadow-1: 0 1px 2px rgba(16, 32, 27, 0.06);
+  --shadow-2: 0 12px 32px rgba(16, 32, 27, 0.12);
+  color-scheme: light;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+  overflow: hidden;
+}
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--text);
+  font-family: var(--font-text);
+  -webkit-font-smoothing: antialiased;
+  user-select: none;
+}
+
+/* طبقات التوهج الزجاجي الزخرفية لا تعترض النقرات أبدًا */
+body::before,
+body::after {
+  pointer-events: none;
+}
+
+* {
+  scrollbar-width: thin;
+  scrollbar-color: var(--border) transparent;
+}
+
+/* منع تعارض السحب: لا زر/حقل داخل شريط العنوان يجعل النافذة تُسحب أو تُكبّر */
+button, a, input, select, textarea, [role="button"] {
+  -webkit-app-region: no-drag;
+}
+
+/* حالات النص الصغير — درجات تضمن تباين 4.5:1 في الوضعين */
+:root {
+  --ok: #137a50;
+}
+html[data-theme] {
+  --ok: #4fe8ab;
+}
+.text-ok {
+  color: var(--ok);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    transition-duration: 0.01ms !important;
+  }
+}

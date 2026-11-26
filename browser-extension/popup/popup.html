@@ -1,0 +1,28 @@
+<!doctype html>
+<html lang="ar" dir="rtl">
+  <head>
+    <meta charset="utf-8" />
+    <link rel="stylesheet" href="popup.css" />
+  </head>
+  <body>
+    <header>
+      <img src="../icons/icon48.png" width="28" height="28" alt="UltraDM" />
+      <div>
+        <h1>UltraDM</h1>
+        <p id="status" class="status">…</p>
+      </div>
+      <button id="toggle" class="icon-btn" aria-label="تشغيل/إيقاف الاصطياد">⏸</button>
+    </header>
+
+    <section>
+      <button id="probe" class="primary">افحص وسائط هذه الصفحة</button>
+      <ul id="media" class="media-list" aria-live="polite"></ul>
+    </section>
+
+    <footer>
+      <label><input type="checkbox" id="enabled" /> اصطياد تلقائي للروابط والبث</label>
+    </footer>
+
+    <script src="popup.js"></script>
+  </body>
+</html>

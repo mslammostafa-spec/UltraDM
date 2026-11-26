@@ -1,0 +1,61 @@
+{
+  "manifest_version": 3,
+  "name": "UltraDM Downloader",
+  "short_name": "UltraDM",
+  "description": "يصطاد روابط التحميل والبث (MP4/M3U8/MPD/Magnet) ويرسلها إلى برنامج UltraDM فورًا مع الـCookies والـUser-Agent.",
+  "version": "1.1.6",
+  "icons": {
+    "16": "icons/icon16.png",
+    "48": "icons/icon48.png",
+    "128": "icons/icon128.png"
+  },
+  "permissions": [
+    "nativeMessaging",
+    "storage",
+    "cookies",
+    "downloads",
+    "contextMenus",
+    "alarms",
+    "notifications"
+  ],
+  "host_permissions": [
+    "http://*/*",
+    "https://*/*",
+    "ws://127.0.0.1/*"
+  ],
+  "background": {
+    "service_worker": "background.js"
+  },
+  "browser_specific_settings": {
+    "gecko": {
+      "id": "ultradm@ml.ai",
+      "strict_min_version": "115.0",
+      "data_collection_permissions": {
+        "required": ["none"]
+      }
+    }
+  },
+  "action": {
+    "default_popup": "popup/popup.html",
+    "default_icon": {
+      "16": "icons/icon16.png",
+      "48": "icons/icon48.png"
+    }
+  },
+  "content_scripts": [
+    {
+      "matches": ["http://*/*", "https://*/*"],
+      "js": ["lib/shared.js", "content/capture.js", "content/floating.js"],
+      "css": ["content/floating.css"],
+      "run_at": "document_idle",
+      "all_frames": true
+    }
+  ],
+  "web_accessible_resources": [
+    {
+      "resources": ["icons/*.png"],
+      "matches": ["http://*/*", "https://*/*"]
+    }
+  ],
+  "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAtljgNs4ecpIJxN5SiBeGcxL+bSHVh+1w2U9yV/F51KuU/Q9s9fXTNG/kUcAWexhNRFkvo+C+EpDhLv8GoWQghJku75OEd/DGUyNp+k4xb4kfuoXA4OuuD8Sub9FUZ85cC47bxKOQR4fSH7ntDdc3cVy1mQyr6Sfkd7RF2DRNkdu87g91uhvlkxPsFyLLT/LQjQpNpwyVt4CRM2r9WDef7Uwfx8jykZHkPcux8QYp8GwE5cRGTHs8UVFP5BEwm+2EZ7OidLaSQrs6qJHL3Yelofqpl1Ek/hK5OqO1B1fEG75aXAvTQ8O6Z5dAhKJiwUF19yNg4COpBodsRzekePZYwwIDAQAB"
+}
