@@ -106,7 +106,7 @@ function deliver(payload) {
 
 function sendNative(payload) {
   try {
-    chrome.runtime.sendNativeMessage(
+    const ok = chrome.runtime.sendNativeMessage(
       S.NATIVE_HOST,
       payload,
       (reply) => {
@@ -118,10 +118,32 @@ function sendNative(payload) {
         if (reply && reply.type === "theme") applyTheme(reply);
       },
     );
-    return nativeFallback;
+    // بريف (Chromium) يُرجع true إن بدأ التشغيل — القيمة الفعلية في الرد.
+    return ok !== false;
   } catch {
     return false;
   }
+}
+
+// قناة أصلية بوعود: جسر موثوق لا يمسّه حجب بريف لـfetch/WebSocket نحو localhost.
+function sendNativeAsync(payload, timeoutMs) {
+  return new Promise((resolve) => {
+    let done = false;
+    const timer = setTimeout(() => {
+      if (!done) { done = true; resolve(null); }
+    }, timeoutMs || 20000);
+    try {
+      chrome.runtime.sendNativeMessage(S.NATIVE_HOST, payload, (reply) => {
+        if (done) return;
+        done = true;
+        clearTimeout(timer);
+        void chrome.runtime.lastError; // يجب قراءتها لتفادي "Unchecked runtime.lastError"
+        resolve(reply || null);
+      });
+    } catch {
+      if (!done) { done = true; clearTimeout(timer); resolve(null); }
+    }
+  });
 }
 
 function applyTheme(t) {
@@ -147,17 +169,21 @@ async function connectWs() {
   }
   // فحص صامت عبر /health قبل فتح الـWebSocket حتى لا يُسجّل المتصفح
   // أخطاء "WebSocket connection failed" عندما يكون البرنامج مغلقاً.
+  // مهم لبريف: Shields يحجب fetch نحو 127.0.0.1 (brave-browser#25855) حتى من
+  // الـService Worker — لذا لا نثق بفشل /health وحده ونجرّب الـWebSocket أيضًا.
   let appUp = false;
   try {
     const r = await fetch(S.HTTP_URL + "/health", { cache: "no-store" });
     appUp = r.ok;
   } catch {
-    appUp = false; // البرنامج مغلق — لا محاولة اتصال ولا ضجيج في السجل.
+    appUp = false; // البرنامج مغلق أو أن بريف يحجب الطلب — نجرب WS على أي حال.
   }
   if (!appUp) {
-    setStatus("offline");
-    scheduleReconnect();
-    return;
+    // لا تثق بالفشل في بريف: إن لم تُفتح القناة سيتكفّل onclose بإعادة المحاولة.
+    if (await sendNativeAsync({ type: "hello", extension: "ultradm" }, 5000)) {
+      nativeFallback = true; // البرنامج حي والقناة الأصلية تعمل
+    }
+    // نكمل وفتح الـWebSocket محاولةً رغم فشل /health.
   }
   let socket;
   try {
@@ -347,10 +373,13 @@ chrome.contextMenus.onClicked.addListener((info, _tab) => {
 // بديل موثوق لقناة الصفحة: يمرر طلب تحميل من content script عبر WS أو Native.
 chrome.runtime.onMessage.addListener((m, _s, respond) => {
   if (m && m.type === "ULTRADM_DOWNLOAD") {
-    // WebSocket أولًا، ثم POST /add كبديل تلقائي حين تكون القناة مغلقة.
+    // WebSocket أولًا، ثم Native Messaging (الوحيد الذي لا يحجبه بريف)، ثم POST /add.
     wsSend({ type: "download", url: m.url, format_id: m.format_id, audio_only: m.audio_only, audio_format: m.audio_format }, 15000)
       .then(async (res) => {
         if (res && res.type === "download-started") return { ok: true, transport: "ws" };
+        // قناة بريف الآمنة: Native Messaging بلا أي fetch شبكي.
+        const native = await sendNativeAsync({ type: "download", url: m.url }, 20000);
+        if (native && native.type === "download-started") return { ok: true, transport: "native" };
         try {
           const r = await fetch(S.HTTP_URL + "/add", {
             method: "POST",
@@ -368,19 +397,29 @@ chrome.runtime.onMessage.addListener((m, _s, respond) => {
   }
   // استعلام الجودات من الزر العائم عبر القناة الوحيدة (Service Worker).
   if (m && m.type === "ULTRADM_PROBE") {
-    wsSend({ type: "probe", url: m.url }, 25000)
-      .then((res) => {
-        if (!res) {
-          respond({ ok: false, code: "app-offline", message: "تعذّر الاتصال ببرنامج UltraDM — افتحه وتأكد من تشغيله" });
-        } else if (res.type === "formats") {
+    (async () => {
+      try {
+        const res = await wsSend({ type: "probe", url: m.url }, 25000);
+        if (res && res.type === "formats") {
           respond({ ok: true, ...res });
-        } else if (res.type === "error") {
-          respond({ ok: false, code: res.code || "probe-failed", message: res.message || "فشل جلب الجودات" });
-        } else {
-          respond({ ok: false, code: "bad-reply", message: "رد غير متوقع من UltraDM" });
+          return;
         }
-      })
-      .catch(() => respond({ ok: false, code: "app-offline", message: "تعذّر الاتصال ببرنامج UltraDM — افتحه وتأكد من تشغيله" }));
+        // بريف: القناة الأصلية بدلاً من WebSocket المحجوب.
+        const native = await sendNativeAsync({ type: "probe", url: m.url }, 30000);
+        if (native && native.type === "formats") {
+          respond({ ok: true, ...native });
+          return;
+        }
+        const err = (res && res.type === "error" && res) || (native && native.type === "error" && native);
+        if (err) {
+          respond({ ok: false, code: err.code || "probe-failed", message: err.message || "فشل جلب الجودات" });
+        } else {
+          respond({ ok: false, code: "app-offline", message: "تعذّر الاتصال ببرنامج UltraDM — افتحه وتأكد من تشغيله" });
+        }
+      } catch {
+        respond({ ok: false, code: "app-offline", message: "تعذّر الاتصال ببرنامج UltraDM — افتحه وتأكد من تشغيله" });
+      }
+    })();
     return true;
   }
   return false;
