@@ -1,9 +1,9 @@
 import { useState } from "react";
 import {
   X, Link2, Magnet, Pause, Play, Trash2, CalendarClock, Moon, Sun, Undo2,
-  Settings, RefreshCw, Info,
+  Settings, RefreshCw, Info, Minimize2,
 } from "lucide-react";
-import { inDesktop } from "../lib/ipc";
+import { inDesktop, exitApp } from "../lib/ipc";
 import { checkForUpdates, type UpdateStatus } from "../lib/updater";
 
 export function ToolbarButton({
@@ -77,13 +77,25 @@ export default function Toolbar({
       className="relative z-50 flex items-center gap-2 px-4 h-16 border-b shrink-0 select-none pointer-events-auto"
       style={{ background: "var(--surface)", borderColor: "var(--border)" }}
     >
-      {/* زر الإغلاق X: أول عنصر في RTL فيلتصق بأقصى اليمين */}
+      {/* زر X: إنهاء حقيقي للبرنامج (يخرج من التطبيق بالكامل).
+          زر الشريط المجاور يخفي النافذة إلى شريط النظام بدلاً منه. */}
       {desktop && (
         <button
           data-tauri-drag-region="false"
           className="w-11 h-11 shrink-0 z-50 pointer-events-auto grid place-items-center cursor-pointer transition-colors duration-150 hover:!bg-[#e5484d] hover:!text-white"
           style={{ color: "var(--muted)" }}
-          aria-label="إخفاء" title="إخفاء"
+          aria-label="إنهاء البرنامج" title="إنهاء البرنامج"
+          onClick={() => { void exitApp(); }}
+        >
+          <X size={16} />
+        </button>
+      )}
+      {desktop && (
+        <button
+          data-tauri-drag-region="false"
+          className="w-11 h-11 shrink-0 z-50 pointer-events-auto grid place-items-center cursor-pointer transition-colors duration-150 hover:!bg-[var(--surface-2)]"
+          style={{ color: "var(--muted)" }}
+          aria-label="إخفاء إلى شريط النظام" title="إخفاء إلى شريط النظام"
           onClick={async () => {
             try {
               const { getCurrentWindow } = await import("@tauri-apps/api/window");
@@ -91,7 +103,7 @@ export default function Toolbar({
             } catch { /* غير مكتبي */ }
           }}
         >
-          <X size={16} />
+          <Minimize2 size={16} />
         </button>
       )}
 
