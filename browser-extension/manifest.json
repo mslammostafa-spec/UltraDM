@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
-  "name": "UltraDM Downloader",
-  "short_name": "UltraDM",
-  "description": "يصطاد روابط التحميل والبث (MP4/M3U8/MPD/Magnet) ويرسلها إلى برنامج UltraDM فورًا مع الـCookies والـUser-Agent.",
+  "name": "الفتح — مدير التحميلات",
+  "short_name": "الفتح",
+  "description": "يصطاد روابط التحميل والبث (MP4/M3U8/MPD/Magnet) ويرسلها إلى برنامج الفتح فورًا مع الـCookies والـUser-Agent.",
   "version": "1.1.28",
   "icons": {
     "16": "icons/icon16.png",

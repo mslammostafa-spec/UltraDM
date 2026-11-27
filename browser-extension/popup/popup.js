@@ -1,15 +1,15 @@
-// UltraDM — البوب-أب: حالة الاتصال، تشغيل/إيقاف، وقائمة وسائط الصفحة.
+// الفتح — البوب-أب: حالة الاتصال، تشغيل/إيقاف، وقائمة وسائط الصفحة.
 const $ = (id) => document.getElementById(id);
 
 function renderState(state) {
   const el = $("status");
   el.textContent =
     state.status === "online"
-      ? "متصل بـ UltraDM (WebSocket)"
+      ? "متصل بـ الفتح (WebSocket)"
       : state.status === "connecting"
         ? "جارٍ الاتصال…"
         : state.enabled
-          ? "غير متصل — شغّل برنامج UltraDM"
+          ? "غير متصل — شغّل برنامج الفتح"
           : "الاصطياد موقوف";
   el.classList.toggle("online", state.status === "online");
   el.classList.toggle("offline", state.status !== "online" && state.enabled);
@@ -53,7 +53,7 @@ $("probe").addEventListener("click", () => {
     for (const m of media) {
       const li = document.createElement("li");
       li.textContent = m.url;
-      li.title = "إرسال إلى UltraDM";
+      li.title = "إرسال إلى الفتح";
       li.addEventListener("click", () =>
         chrome.runtime.sendMessage({
           type: "capture",

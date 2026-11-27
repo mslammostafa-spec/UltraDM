@@ -174,7 +174,7 @@ export default function Sidebar({
           <HardDriveDownload size={22} strokeWidth={2.2} />
         </div>
         <div>
-          <div className="font-display font-bold text-[17px] tracking-tight leading-4">UltraDM</div>
+          <div className="font-display font-bold text-[17px] tracking-tight leading-4">الفتح</div>
           <div className="text-[11px]" style={{ color: "var(--muted)" }}>مدير التحميلات المتطور</div>
         </div>
       </div>

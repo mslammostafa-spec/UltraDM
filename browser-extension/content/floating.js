@@ -13,8 +13,8 @@
   const IS_AR =
     /^ar/i.test(navigator.language || "") ||
     /^ar/i.test(document.documentElement.lang || "");
-  const LABEL = IS_AR ? "تحميل عبر UltraDM" : "Download with UltraDM";
-  const OFFLINE_LABEL = IS_AR ? "UltraDM غير متصل" : "UltraDM offline";
+  const LABEL = IS_AR ? "تحميل عبر الفتح" : "Download with AlFath";
+  const OFFLINE_LABEL = IS_AR ? "الفتح غير متصل" : "AlFath offline";
   let lastLabel = LABEL;
 
   chrome.storage.local.get(["theme"], (s) => {
@@ -54,7 +54,7 @@
       const res = await chrome.runtime.sendMessage({ type: "ULTRADM_PROBE", url });
       return res && res.ok ? res : { ok: false, code: res && res.code, message: res && res.message };
     } catch {
-      return { ok: false, code: "app-offline", message: "تعذّر الاتصال ببرنامج UltraDM — افتحه وتأكد من تشغيله" };
+      return { ok: false, code: "app-offline", message: "تعذّر الاتصال ببرنامج الفتح — افتحه وتأكد من تشغيله" };
     }
   }
 
@@ -137,7 +137,7 @@
         it.querySelector(".ultradm-menu-q").textContent = "جارٍ الإرسال…";
         const ok = await directDownload(url, f);
         closeMenus();
-        flash(btn, ok ? "بدأ التحميل في UltraDM ✓" : "تعذّر إرسال التحميل");
+        flash(btn, ok ? "بدأ التحميل في الفتح ✓" : "تعذّر إرسال التحميل");
       });
       // نصوص الجودات تأتي من yt-dlp (عناوين غير مُهرَّبة): textContent فقط
       // — innerHTML هنا يعني إمكانية حقن HTML في سياق سكربت المحتوى.
@@ -172,7 +172,7 @@
     btn.classList.remove("loading");
     if (!cached || !cached.ok || !Array.isArray(cached.formats) || !cached.formats.length) {
       // رسالة صادقة: نعرف الفرق بين "البرنامج مغلق" و"yt-dlp فشل على هذا الرابط".
-      flash(btn, (cached && cached.message) || "تعذّر جلب الجودات — افتح UltraDM");
+      flash(btn, (cached && cached.message) || "تعذّر جلب الجودات — افتح الفتح");
       return;
     }
     buildMenu(btn, cached.title, cached.formats, url, btn);
@@ -307,14 +307,14 @@
         buildMenu(cap, res.title, res.formats, url, cap);
         return;
       }
-      // فشل الجلب: اشرح السبب ثم أرسل الرابط إلى UltraDM كخطة بديلة.
+      // فشل الجلب: اشرح السبب ثم أرسل الرابط إلى الفتح كخطة بديلة.
       setLabel((res && res.message) || "تعذّر جلب الجودات");
-      setTimeout(() => setLabel("جارٍ الإرسال لـ UltraDM…"), 1800);
+      setTimeout(() => setLabel("جارٍ الإرسال لـ الفتح…"), 1800);
       try {
         await chrome.runtime.sendMessage({ type: "ULTRADM_DOWNLOAD", url, title: document.title });
-        setLabel("تم الإرسال لـ UltraDM ✓");
+        setLabel("تم الإرسال لـ الفتح ✓");
       } catch {
-        setLabel("افتح UltraDM أولاً");
+        setLabel("افتح الفتح أولاً");
       }
       setTimeout(() => setLabel(LABEL), 2500);
     });

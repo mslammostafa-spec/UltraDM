@@ -472,7 +472,7 @@ pub fn native_host_main() {
             serde_json::json!({
                 "type": "error",
                 "code": "app-closed",
-                "message": "برنامج UltraDM غير مفتوح — افتحه أولًا ثم أعد المحاولة"
+                "message": "برنامج الفتح غير مفتوح — افتحه أولًا ثم أعد المحاولة"
             })
             .to_string()
         });
@@ -552,7 +552,7 @@ pub fn run() {
                 items: StdMutex::new(std::collections::HashMap::new()),
                 limiter: Arc::new(SpeedLimiter::new()),
                 client: reqwest::Client::builder()
-                    .user_agent("UltraDM/1.0")
+                    .user_agent("AlFath/1.0")
                     .tcp_nodelay(true)
                     .timeout(std::time::Duration::from_secs(30))
                     .read_timeout(std::time::Duration::from_secs(30))
@@ -603,12 +603,12 @@ pub fn run() {
             }
 
 
-            let show = MenuItem::with_id(app, "show", "إظهار UltraDM", true, None::<&str>)?;
+            let show = MenuItem::with_id(app, "show", "إظهار الفتح", true, None::<&str>)?;
             let quit = MenuItem::with_id(app, "quit", "خروج نهائي (Exit)", true, None::<&str>)?;
             let menu = Menu::with_items(app, &[&show, &quit])?;
             let mut tray = tauri::tray::TrayIconBuilder::with_id("ultradm-tray")
                 .menu(&menu)
-                .tooltip("UltraDM")
+                .tooltip("الفتح")
                 .on_menu_event(|app, event| {
                     if event.id() == "quit" {
                         app.exit(0);
@@ -678,7 +678,7 @@ pub fn run() {
             expand_path
         ])
         .run(tauri::generate_context!())
-        .expect("خطأ في تشغيل UltraDM");
+        .expect("خطأ في تشغيل الفتح");
 }
 
 #[cfg(test)]

@@ -25,11 +25,12 @@ fn register_impl() -> Result<(), String> {
         .map_err(|e| e.to_string())?;
     open.set_value("", &cmd.as_str()).map_err(|e| e.to_string())?;
 
-    // ملفات .torrent عبر ProgID خاص بـ UltraDM:
+    // ملفات .torrent عبر ProgID خاص: مفاتيح Registry تبقى UltraDM.torrent
+    // حتى لا تنقطع ربطات الملفات لدى من ثبّت نسخة سابقة من البرنامج.
     let (prog, _) = hkcu
         .create_subkey("Software\\Classes\\UltraDM.torrent")
         .map_err(|e| e.to_string())?;
-    prog.set_value("", &"UltraDM Torrent").map_err(|e| e.to_string())?;
+    prog.set_value("", &"الفتح Torrent").map_err(|e| e.to_string())?;
     let (open2, _) = hkcu
         .create_subkey("Software\\Classes\\UltraDM.torrent\\shell\\open\\command")
         .map_err(|e| e.to_string())?;

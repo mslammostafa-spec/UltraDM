@@ -262,7 +262,7 @@ async fn handle_message(app: &AppHandle, raw: &str) -> Option<String> {
             // وإن فشل yt-dlp مرّر رسالته الحقيقية بدل الخطأ العام.
             let tools = super::media::media_check();
             if !tools.ytdlp {
-                return Some("{\"type\":\"error\",\"code\":\"tools-missing\",\"message\":\"yt-dlp غير مثبَّت — افتح UltraDM وثبّت الأدوات من الإعدادات\"}".into());
+                return Some("{\"type\":\"error\",\"code\":\"tools-missing\",\"message\":\"yt-dlp غير مثبَّت — افتح الفتح وثبّت الأدوات من الإعدادات\"}".into());
             }
             match super::media::media_probe(url).await {
                 Ok(info) => Some(probe_reply(&info).to_string()),
@@ -604,7 +604,7 @@ fn write_native_manifest(app: &tauri::AppHandle) -> Result<std::path::PathBuf, S
         .collect();
     let manifest = serde_json::json!({
         "name": NATIVE_HOST_NAME,
-        "description": "UltraDM Native Messaging Bridge",
+        "description": "الفتح Native Messaging Bridge",
         // "path" يجب أن يكون ملفًا تنفيذيًا بلا وسائط — لذا السكربت الوسيط.
         "path": launcher.display().to_string(),
         "type": "stdio",

@@ -1,4 +1,4 @@
-name: Release UltraDM
+name: Release AlFath
 
 on:
   push:
@@ -49,7 +49,7 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
           tagName: v__VERSION__
-          releaseName: "UltraDM v__VERSION__"
+          releaseName: "الفتح v__VERSION__"
           releaseBody: "Free code signing provided by SignPath.io, certificate by SignPath Foundation. حمّل الملف التنفيذي المناسب لمعالجتك (x64 أو ARM64). ملف latest.json مطلوب لتحديثات البرنامج التلقائية."
           releaseDraft: false
           prerelease: false
@@ -60,7 +60,7 @@ jobs:
         run: |
           npx tauri build --config src-tauri/tauri.microsoftstore.conf.json --target ${{ matrix.target }}
           mkdir -p store-package
-          cp src-tauri/target/${{ matrix.target }}/release/bundle/msi/*.msi store-package/UltraDM-Store-x64.msi
+          cp src-tauri/target/${{ matrix.target }}/release/bundle/msi/*.msi store-package/AlFath-Store-x64.msi
 
       - name: Upload store package and extension zip as artifacts
         if: matrix.target == 'x86_64-pc-windows-msvc'
@@ -68,7 +68,7 @@ jobs:
         with:
           name: microsoft-store-package
           path: |
-            store-package/UltraDM-Store-x64.msi
-            store-package/UltraDM-Store-x64-signed.msi
+            store-package/AlFath-Store-x64.msi
+            store-package/AlFath-Store-x64-signed.msi
             browser-extension.zip
           if-no-files-found: ignore

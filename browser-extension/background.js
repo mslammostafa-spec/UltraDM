@@ -1,4 +1,4 @@
-// UltraDM — Service Worker: يحافظ على قناة فائقة السرعة مع برنامج UltraDM
+// الفتح — Service Worker: يحافظ على قناة فائقة السرعة مع برنامج الفتح
 // (WebSocket محلي أولًا، وNative Messaging كبديل) ويرسل الروابط المُلتقطة
 // مع الـCookies والـUser-Agent.
 
@@ -215,7 +215,7 @@ async function connectWs() {
         chrome.notifications.create({
           type: "basic",
           iconUrl: "icons/icon128.png",
-          title: "UltraDM",
+          title: "الفتح",
           message: "بدأ التحميل: " + msg.url.slice(0, 80),
         });
       }
@@ -359,7 +359,7 @@ chrome.runtime.onInstalled.addListener(() => {
   chrome.contextMenus.removeAll(() => {
     chrome.contextMenus.create({
       id: "ultradm-download",
-      title: "تحميل عبر UltraDM",
+      title: "تحميل عبر الفتح",
       contexts: ["link", "video", "audio"],
     });
   });
@@ -412,7 +412,7 @@ chrome.runtime.onMessage.addListener((m, _s, respond) => {
         ok: false,
         transport: "none",
         code: "app-offline",
-        message: "تعذّر الوصول إلى برنامج UltraDM عبر كل القنوات — افتحه، وإن كنت على بريف فعِّل " +
+        message: "تعذّر الوصول إلى برنامج الفتح عبر كل القنوات — افتحه، وإن كنت على بريف فعِّل " +
                  "«تثبيت الربط تلقائيًا» من إعدادات البرنامج (قناة Native Messaging الوحيدة التي لا يحجبها بريف)",
       };
     })()
@@ -438,7 +438,7 @@ chrome.runtime.onMessage.addListener((m, _s, respond) => {
       if (err) {
         respond({ ok: false, code: err.code || "probe-failed", message: err.message || "فشل جلب الجودات" });
       } else {
-        respond({ ok: false, code: "app-offline", message: "تعذّر الاتصال ببرنامج UltraDM — افتحه، وإن استمرت المشكلة فعِّل «تثبيت الربط تلقائيًا» من إعدادات البرنامج" });
+        respond({ ok: false, code: "app-offline", message: "تعذّر الاتصال ببرنامج الفتح — افتحه، وإن استمرت المشكلة فعِّل «تثبيت الربط تلقائيًا» من إعدادات البرنامج" });
       }
     })();
     return true;

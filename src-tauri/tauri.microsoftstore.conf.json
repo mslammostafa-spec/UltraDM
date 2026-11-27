@@ -1,6 +1,6 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
-  "productName": "UltraDM",
+  "productName": "AlFath",
   "version": "1.0.0",
   "identifier": "62075UltraDM.35296B77688A9",
   "build": {
@@ -10,7 +10,7 @@
   "app": {
     "windows": [
       {
-        "title": "UltraDM",
+        "title": "الفتح",
         "label": "main",
         "width": 1280,
         "height": 800,
@@ -35,7 +35,7 @@
     "icon": [
       "icons/icon.ico"
     ],
-    "publisher": "UltraDM",
+    "publisher": "الفتح",
     "windows": {
       "webviewInstallMode": {
         "type": "downloadBootstrapper"

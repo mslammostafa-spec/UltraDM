@@ -3,8 +3,8 @@
   "artifacts": [
     {
       "type": "file",
-      "path": "UltraDM-Store-x64.msi",
-      "description": "UltraDM Microsoft Store MSI package (per-machine, MSIX-ready)"
+      "path": "AlFath-Store-x64.msi",
+      "description": "AlFath Microsoft Store MSI package (per-machine, MSIX-ready)"
     }
   ]
 }

@@ -1,7 +1,7 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "default",
-  "description": "UltraDM default permissions",
+  "description": "الفتح default permissions",
   "windows": ["main", "ultradm-info", "ultradm-progress"],
   "permissions": [
     "core:default",

@@ -1,4 +1,4 @@
-; خطّاف مثبّت NSIS لبرنامج UltraDM (Tauri 2: bundle > windows > nsis > installerHooks)
+; خطّاف مثبّت NSIS لبرنامج الفتح (Tauri 2: bundle > windows > nsis > installerHooks)
 ; يقوم عند التثبيت بـ:
 ;  1) كتابة ملف manifest الخاص بـ Native Messaging (المضيف com.ultradm.bridge) داخل مجلد التثبيت.
 ;  2) اكتشاف المتصفحات المثبتة (Chrome / Edge / Brave / Opera) عبر مفاتيح التسجيل وكتابة مساراتها في browser-paths.txt.
@@ -36,16 +36,16 @@ ${Using:StrFunc} StrRep
 
   ; سكربت وسيط: Chromium/Firefox لا يدعمان "args" في manifest — يجب أن
   ; يشير "path" إلى ملف تنفيذي يمرر --native-host بنفسه.
-  FileOpen $R1 "$INSTDIR\UltraDM-native-host.cmd" w
+  FileOpen $R1 "$INSTDIR\al-fath-native-host.cmd" w
   FileWrite $R1 '@echo off$\r$\n'
-  FileWrite $R1 '"$INSTDIR\UltraDM.exe" --native-host %*$\r$\n'
+  FileWrite $R1 '"$INSTDIR\${MAINBINARYNAME}.exe" --native-host %*$\r$\n'
   FileClose $R1
 
   ; ملف manifest الخاص بـ Native Messaging داخل مجلد التثبيت
   FileOpen $R1 "$INSTDIR\browser-extension\native-host.json" w
   FileWrite $R1 '{"name": "com.ultradm.bridge",$\n'
-  FileWrite $R1 ' "description": "UltraDM Native Messaging Bridge",$\n'
-  FileWrite $R1 ' "path": "$R0\\UltraDM-native-host.cmd",$\n'
+  FileWrite $R1 ' "description": "الفتح Native Messaging Bridge",$\n'
+  FileWrite $R1 ' "path": "$R0\\al-fath-native-host.cmd",$\n'
   FileWrite $R1 ' "type": "stdio",$\n'
   FileWrite $R1 ' "allowed_origins": [$\n'
   FileWrite $R1 '   "chrome-extension://kpjldkbninldcnhfjnbpbenejifihobc/"$\n'

@@ -25,7 +25,7 @@ export async function openAuxWindow(kind: AuxWindowKind, payload?: unknown): Pro
   }
   const win = new WebviewWindow(label, {
     url: `index.html?${AUX_QUERY_KEY}=${kind}`,
-    title: kind === "info" ? "معلومات التحميل — UltraDM" : "تقدّم التحميل — UltraDM",
+    title: kind === "info" ? "معلومات التحميل — الفتح" : "تقدّم التحميل — الفتح",
     width: 640,
     height: 540,
     center: true,

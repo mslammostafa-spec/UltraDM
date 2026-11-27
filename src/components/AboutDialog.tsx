@@ -30,7 +30,7 @@ export default function AboutDialog({
         <div className="flex items-center justify-between">
           <h2 className="text-lg font-bold flex items-center gap-2" style={{ color: "var(--text)" }}>
             <img src="/icons/ultradm.svg" alt="" className="w-6 h-6" />
-            حول UltraDM
+            حول الفتح
           </h2>
           <button
             onClick={onClose}
@@ -94,7 +94,7 @@ export default function AboutDialog({
         </div>
 
         <p className="text-xs text-center opacity-60" style={{ color: "var(--text)" }}>
-          UltraDM — مدير تحميل فائق السرعة · رخصة MIT
+          الفتح — مدير تحميل فائق السرعة · رخصة MIT
         </p>
       </div>
     </div>

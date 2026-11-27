@@ -1,8 +1,8 @@
 # Security Policy / سياسة الأمان
 
-UltraDM is an open-source project maintained by a single developer. Taking security reports seriously is part of keeping it trustworthy.
+الفتح (AlFath) is an open-source project maintained by a single developer. Taking security reports seriously is part of keeping it trustworthy.
 
-برنامج UltraDM مشروع مفتوح المصدر يُطوَّر بواسطة مطوّر واحد، والإبلاغ المسؤول عن الثغرات جزء من الحفاظ على ثقة المشروع.
+برنامج الفتح مشروع مفتوح المصدر يُطوَّر بواسطة مطوّر واحد، والإبلاغ المسؤول عن الثغرات جزء من الحفاظ على ثقة المشروع.
 
 ## Supported versions / الإصدارات المدعومة
 
@@ -41,7 +41,7 @@ Please include:
 
 In scope:
 
-- The UltraDM Windows application (Tauri/Rust backend and its IPC commands).
+- The الفتح (AlFath) Windows application (Tauri/Rust backend and its IPC commands).
 - The Native Messaging host and its registry configuration written by the installer.
 - The bundled browser extension (`browser-extension/`), including permissions and message handling.
 - The installer hooks (`src-tauri/installer-hooks.nsh`), e.g. registry keys written during install/uninstall.

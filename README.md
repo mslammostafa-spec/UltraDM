@@ -1,8 +1,8 @@
-# UltraDM
+# الفتح (AlFath)
 
-**UltraDM** is a fast, lightweight download manager for Windows, built with **Tauri 2 (Rust)** for the backend and **React + TypeScript + TailwindCSS v4** for the UI. It ships with an Arabic, right-to-left first interface, dark and light themes, and a companion browser extension that sends downloads from Chrome, Edge and Brave straight into the app.
+**الفتح (AlFath)** is a fast, lightweight download manager for Windows, built with **Tauri 2 (Rust)** for the backend and **React + TypeScript + TailwindCSS v4** for the UI. It ships with an Arabic, right-to-left first interface, dark and light themes, and a companion browser extension that sends downloads from Chrome, Edge and Brave straight into the app.
 
-> مدير تحميلات لسطح المكتب (ويندوز) مبني بـ Tauri 2 + Rust للخلفية و React + TypeScript + TailwindCSS v4 للواجهة، بواجهة عربية من اليمين إلى اليسار تدعم الوضعين الليلي والنهاري، مع إضافة متصفح ترسل التحميلات من Chrome وEdge وBrave مباشرة إلى البرنامج.
+> **الفتح (AlFath)** — مدير تحميلات لسطح المكتب (ويندوز) مبني بـ Tauri 2 + Rust للخلفية و React + TypeScript + TailwindCSS v4 للواجهة، بواجهة عربية من اليمين إلى اليسار تدعم الوضعين الليلي والنهاري، مع إضافة متصفح ترسل التحميلات من Chrome وEdge وBrave مباشرة إلى البرنامج.
 
 ## What it does / ماذا يفعل البرنامج
 
@@ -11,7 +11,7 @@
 - **Clipboard capture** — copies of direct links or magnets are detected automatically and offered as new downloads.
 - **Category sidebar** — All, Video, Audio, Archives, Programs, Documents, Torrents.
 - **Scheduling & post-download actions** — queue a download for later, then shut down, sleep or close the app when everything finishes.
-- **Browser extension** — the Windows installer registers a Native Messaging host and force-installs the extension in Chrome, Edge and Brave, so "Download with UltraDM" works from the first install.
+- **Browser extension** — the Windows installer registers a Native Messaging host and force-installs the extension in Chrome, Edge and Brave, so "Download with AlFath" works from the first install.
 - **Tray icon with quick exit menu**, window minimised to tray.
 - **Tiny footprint** — release profile tuned (`opt-level = "z"`, fat LTO, stripped) and the system WebView2 used for the UI keeps idle memory low.
 
@@ -19,8 +19,8 @@
 
 Grab the latest installer from [Releases](https://github.com/mslammostafa-spec/UltraDM/releases):
 
-- `UltraDM_1.0.0_x64-setup.exe` — NSIS installer (recommended)
-- `UltraDM_1.0.0_x64_en-US.msi` — MSI package
+- `AlFath_1.1.30_x64-setup.exe` — NSIS installer (recommended)
+- `AlFath_1.1.30_x64_en-US.msi` — MSI package
 
 Free code signing provided by [SignPath.io](https://signpath.io), certificate by [SignPath Foundation](https://signpath.org).
 
