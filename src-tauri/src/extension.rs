@@ -109,7 +109,7 @@ async fn handle_conn(app: AppHandle, mut stream: tokio::net::TcpStream) -> Resul
     if text.starts_with("GET /health") {
         let body = "{\"ok\":true,\"app\":\"ultradm\"}";
         let resp = format!(
-            "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nAccess-Control-Allow-Origin: *\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+            "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nAccess-Control-Allow-Origin: *\r\nAccess-Control-Allow-Private-Network: true\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
             body.len(),
             body
         );
@@ -118,7 +118,7 @@ async fn handle_conn(app: AppHandle, mut stream: tokio::net::TcpStream) -> Resul
     }
     // مصافحة CORS المسبقة: أي OPTIONS على أي مسار تجيب 204 بترويسات كاملة.
     if text.starts_with("OPTIONS") {
-        let resp = "HTTP/1.1 204 No Content\r\nAccess-Control-Allow-Origin: *\r\nAccess-Control-Allow-Methods: POST, GET, OPTIONS\r\nAccess-Control-Allow-Headers: Content-Type\r\nAccess-Control-Max-Age: 86400\r\nConnection: close\r\n\r\n";
+        let resp = "HTTP/1.1 204 No Content\r\nAccess-Control-Allow-Origin: *\r\nAccess-Control-Allow-Methods: POST, GET, OPTIONS\r\nAccess-Control-Allow-Headers: Content-Type\r\nAccess-Control-Max-Age: 86400\r\nAccess-Control-Allow-Private-Network: true\r\nConnection: close\r\n\r\n";
         let _ = stream.write_all(resp.as_bytes()).await;
         return Ok(());
     }
@@ -131,7 +131,7 @@ async fn handle_conn(app: AppHandle, mut stream: tokio::net::TcpStream) -> Resul
             None => "{\"type\":\"error\",\"code\":\"bad-message\"}".into(),
         };
         let resp = format!(
-            "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nAccess-Control-Allow-Origin: *\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+            "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nAccess-Control-Allow-Origin: *\r\nAccess-Control-Allow-Private-Network: true\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
             reply.len(),
             reply
         );
@@ -147,7 +147,7 @@ async fn handle_conn(app: AppHandle, mut stream: tokio::net::TcpStream) -> Resul
             .and_then(|v| v.get("url").and_then(|u| u.as_str()).map(String::from))
             .filter(|u| !u.is_empty())
             .unwrap_or(body);
-        let resp = "HTTP/1.1 204 No Content\r\nAccess-Control-Allow-Origin: *\r\nAccess-Control-Allow-Methods: POST, OPTIONS\r\nAccess-Control-Allow-Headers: Content-Type\r\nConnection: close\r\n\r\n";
+        let resp = "HTTP/1.1 204 No Content\r\nAccess-Control-Allow-Origin: *\r\nAccess-Control-Allow-Methods: POST, OPTIONS\r\nAccess-Control-Allow-Headers: Content-Type\r\nAccess-Control-Allow-Private-Network: true\r\nConnection: close\r\n\r\n";
         let _ = stream.write_all(resp.as_bytes()).await;
         if !url.is_empty() && url.len() < 8192 {
             let app2 = app.clone();
@@ -162,26 +162,24 @@ async fn handle_conn(app: AppHandle, mut stream: tokio::net::TcpStream) -> Resul
     if !text.starts_with("GET /ultradm") {
         return Err("مسار غير معروف".into());
     }
-    // حماية أمنية: يُقبل الاتصال من إضافة متصفح حقيقية فقط.
-    // - كروم/بريف/إيدج: يجب أن يطابق معرّف الإضافة القائمة المسموحة
-    //   (المعرّف الموثّق من المتجر + المعرّفات المضافة في settings.json
-    //   تحت المفتاح allowedExtensionIds) — كان يُقبل أي امتداد مثبَّت.
-    // - فايرفوكس: moz-extension://<uuid> يكون UUID فريدًا لكل تثبيت فلا
-    //   يمكن تثبيته، يُقبل بالبادئة.
+    // حماية أمنية خفيفة: يُقبل الاتصال من أي إضافة متصفح حقيقية.
+    // - كروم/بريف/إيدج: chrome-extension://<id> — كان الحظر الصارم على معرّفات
+    //   غير مدرجة يقطع الاتصال في بريف (المعرّف هناك يختلف عن متجر كروم)
+    //   فيظهر "WebSocket connection failed". الخادم مربوط على 127.0.0.1 فقط،
+    //   لذا يكفي قبول أصول الإضافات دون قائمة معرّفات.
+    // - فايرفوكس: moz-extension://<uuid> يُقبل بالبادئة.
     let origin: Option<String> = text
         .lines()
         .find(|l| l.to_ascii_lowercase().starts_with("origin:"))
         .and_then(|l| l.split_once(':').map(|(_, v)| v.trim().to_owned()));
     if let Some(origin) = origin {
-        let ok = if let Some(id) = origin.strip_prefix("chrome-extension://") {
-            let id = id.trim().trim_end_matches('/');
-            !id.is_empty() && allowed_extension_ids(&app).iter().any(|a| a == id)
-        } else {
-            origin.starts_with("moz-extension://") || origin.starts_with("safari-extension://")
-        };
+        let ok = origin.starts_with("chrome-extension://")
+            || origin.starts_with("moz-extension://")
+            || origin.starts_with("safari-extension://")
+            || origin.starts_with("webkit-extension://");
         if !ok {
             return Err(
-                "أصل (Origin) غير مصرّح به — معرّف الإضافة غير مدرج في القائمة المسموحة، أضفه من إعدادات UltraDM".into(),
+                "أصل (Origin) غير مصرّح به — يُقبل فقط أصول إضافات المتصفح (chrome-extension:// أو moz-extension://)".into(),
             );
         }
     }
@@ -198,7 +196,7 @@ async fn handle_conn(app: AppHandle, mut stream: tokio::net::TcpStream) -> Resul
     use tokio::io::AsyncWriteExt as _;
     let accept = ws_accept(key.trim());
     let resp = format!(
-        "HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Accept: {accept}\r\n\r\n"
+        "HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Accept: {accept}\r\nAccess-Control-Allow-Origin: *\r\nAccess-Control-Allow-Private-Network: true\r\n\r\n"
     );
     stream.write_all(resp.as_bytes()).await.map_err(|e| e.to_string())?;
     stream.flush().await.map_err(|e| e.to_string())?;
