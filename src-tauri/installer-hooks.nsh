@@ -34,12 +34,18 @@ ${Using:StrFunc} StrRep
   ; تحويل فواصل المسار لصيغة JSON صالحة (\\ بدلًا من \)
   ${StrRep} $R0 "$INSTDIR" "\" "\\"
 
+  ; سكربت وسيط: Chromium/Firefox لا يدعمان "args" في manifest — يجب أن
+  ; يشير "path" إلى ملف تنفيذي يمرر --native-host بنفسه.
+  FileOpen $R1 "$INSTDIR\UltraDM-native-host.cmd" w
+  FileWrite $R1 '@echo off$\r$\n'
+  FileWrite $R1 '"$INSTDIR\UltraDM.exe" --native-host %*$\r$\n'
+  FileClose $R1
+
   ; ملف manifest الخاص بـ Native Messaging داخل مجلد التثبيت
   FileOpen $R1 "$INSTDIR\browser-extension\native-host.json" w
   FileWrite $R1 '{"name": "com.ultradm.bridge",$\n'
   FileWrite $R1 ' "description": "UltraDM Native Messaging Bridge",$\n'
-  FileWrite $R1 ' "path": "$R0\\UltraDM.exe",$\n'
-  FileWrite $R1 ' "args": ["--native-host"],$\n'
+  FileWrite $R1 ' "path": "$R0\\UltraDM-native-host.cmd",$\n'
   FileWrite $R1 ' "type": "stdio",$\n'
   FileWrite $R1 ' "allowed_origins": [$\n'
   FileWrite $R1 '   "chrome-extension://kpjldkbninldcnhfjnbpbenejifihobc/"$\n'

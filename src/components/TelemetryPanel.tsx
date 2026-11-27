@@ -38,7 +38,7 @@ export default function TelemetryPanel({
   return (
     <aside
       aria-label="القياسات والسجل"
-      className="w-[230px] shrink-0 flex flex-col gap-3 p-4 overflow-y-auto"
+      className="w-[230px] max-w-[38vw] shrink-0 flex flex-col gap-3 p-4 overflow-y-auto"
       style={{ background: "var(--surface)", borderInlineEnd: "1px solid var(--border)" }}
     >
       {/* مخطط النطاق الترددي */}

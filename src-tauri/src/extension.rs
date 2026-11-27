@@ -555,12 +555,31 @@ fn native_manifest_path() -> std::path::PathBuf {
     base.join("UltraDM").join("native-host.json")
 }
 
-/// يكتب ملف manifest الـNative Messaging (مصدر الحقيقة لأوامر winreg).
-/// المسار يشير إلى البرنامج نفسه مع الوسيط `--native-host`: الوضع الذي
-/// يقرأ رسائل المتصفح (طول 4 بايت little-endian + JSON) عبر stdin/stdout —
-/// كان manifest يشير إلى الواجهة الرسومية التي تغلق فورًا فتموت القناة.
+/// يكتب ملف manifest الـNative Messaging مع سكربت وسيط (launcher).
+/// Chromium وFirefox لا يدعمان مفتاح "args" في manifest — كانا يطلقان
+/// البرنامج بلا `--native-host` فتُفتح الواجهة الرسومية بدل مضيف stdio
+/// وتموت القناة بصمت. لذا يشير "path" الآن إلى سكربت يمرر الوسيط إلزاميًا.
 fn write_native_manifest(app: &tauri::AppHandle) -> Result<std::path::PathBuf, String> {
     let exe = std::env::current_exe().map_err(|e| e.to_string())?;
+
+    // سكربت الوسيط: يشغّل البرنامج مع --native-host ويمرر أي وسائط أخرى.
+    let launcher = native_manifest_path().with_extension("native-host.cmd");
+    if let Some(dir) = launcher.parent() {
+        std::fs::create_dir_all(dir).map_err(|e| format!("تعذّر إنشاء مجلد manifest ({}): {e}", dir.display()))?;
+    }
+    let script = if cfg!(target_os = "windows") {
+        format!("@echo off\r\n\"{}\" --native-host %*\r\n", exe.display())
+    } else {
+        format!("#!/bin/sh\nexec \"{}\" --native-host \"$@\"\n", exe.display())
+    };
+    std::fs::write(&launcher, script)
+        .map_err(|e| format!("تعذّر كتابة سكربت المضيف ({}): {e}", launcher.display()))?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let _ = std::fs::set_permissions(&launcher, std::fs::Permissions::from_mode(0o755));
+    }
+
     let origins: Vec<String> = allowed_extension_ids(app)
         .iter()
         .map(|id| format!("chrome-extension://{id}/"))
@@ -568,8 +587,8 @@ fn write_native_manifest(app: &tauri::AppHandle) -> Result<std::path::PathBuf, S
     let manifest = serde_json::json!({
         "name": NATIVE_HOST_NAME,
         "description": "UltraDM Native Messaging Bridge",
-        "path": exe.display().to_string(),
-        "args": ["--native-host"],
+        // "path" يجب أن يكون ملفًا تنفيذيًا بلا وسائط — لذا السكربت الوسيط.
+        "path": launcher.display().to_string(),
         "type": "stdio",
         "allowed_origins": origins,
         // متصفحات Gecko (Firefox/Waterfox/LibreWolf/Zen) تتطلب allowed_extensions

@@ -80,7 +80,7 @@ export default function Toolbar({
         if ((e.target as HTMLElement).closest("button, a, input, select, [role=\"button\"]")) return;
         void apiMax();
       }}
-      className="sticky top-0 z-50 flex items-center gap-2 px-4 h-16 border-b shrink-0 select-none pointer-events-auto min-w-0 max-w-full overflow-x-auto overflow-y-hidden [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
+      className="sticky top-0 z-50 flex flex-wrap items-center gap-2 px-4 min-h-16 py-1.5 border-b shrink-0 select-none pointer-events-auto min-w-0 max-w-full overflow-visible"
       style={{ background: "var(--surface)", borderColor: "var(--border)" }}
     >
       {/* زر X: إنهاء حقيقي للبرنامج (يخرج من التطبيق بالكامل).
@@ -114,7 +114,7 @@ export default function Toolbar({
       )}
 
       {/* منطقة الأزرار: مستثناة تماماً من السحب — كل نقرة تعمل ولا تُكبّر النافذة. */}
-      <div className="flex items-center gap-2 h-full min-w-0 flex-1">
+      <div className="flex flex-wrap items-center gap-2 min-w-0 flex-1">
       <div data-tauri-drag-region="false" className="flex items-center gap-2 shrink-0">
         <ToolbarButton variant="primary" label="إضافة رابط تحميل" onClick={() => { flash("link"); onAddLink(); }}>
           <Link2 size={17} />
@@ -158,7 +158,7 @@ export default function Toolbar({
 
       <div className="flex-1 min-w-1 shrink" />
 
-      <div data-tauri-drag-region="false" className="flex items-center gap-2 shrink-0">
+      <div data-tauri-drag-region="false" className="flex items-center gap-2 shrink-0 ms-auto">
         <ToolbarButton className="shrink-0" label={dark ? "الوضع النهاري" : "الوضع الليلي"} onClick={onToggleTheme}>
           {dark ? <Sun size={17} /> : <Moon size={17} />}
         </ToolbarButton>

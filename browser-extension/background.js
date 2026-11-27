@@ -278,8 +278,18 @@ async function handleCapture(m) {
     source: m.source || "content",
   };
 
-  // Magnet يمر عبر Native Messaging دائمًا (لا يمكن إرساله عبر HTTP).
-  const ok = payload.kind === "torrent" ? sendNative(payload) || deliver(payload) : deliver(payload);
+  // Native Messaging أولًا (القناة الوحيدة التي لا يحجبها بريف) ثم WebSocket،
+  // وMagnet يمر عبر Native Messaging دائمًا (لا يمكن إرساله عبر HTTP).
+  let ok;
+  if (payload.kind === "torrent") {
+    ok = sendNative(payload) || deliver(payload);
+  } else {
+    ok = sendNative(payload) || deliver(payload);
+    if (!ok) {
+      // آخر محاولة: أعد عبر Native غير المتزامن (أطول مهلة) قبل الاستسلام.
+      ok = Boolean(await sendNativeAsync(payload, 15000));
+    }
+  }
   return { ok: Boolean(ok), transport: ok ? (wsReady ? "ws" : "native") : "none" };
 }
 
@@ -374,15 +384,23 @@ chrome.contextMenus.onClicked.addListener((info, _tab) => {
 // بديل موثوق لقناة الصفحة: يمرر طلب تحميل من content script عبر WS أو Native.
 chrome.runtime.onMessage.addListener((m, _s, respond) => {
   if (m && m.type === "ULTRADM_DOWNLOAD") {
-    // WebSocket أولًا، ثم Native Messaging (الوحيد الذي لا يحجبه بريف)، ثم POST /add.
-    wsSend({ type: "download", url: m.url, format_id: m.format_id, audio_only: m.audio_only, audio_format: m.audio_format }, 15000)
-      .then(async (res) => {
-        if (res && res.type === "download-started") return { ok: true, transport: "ws" };
-        // قناة بريف الآمنة: Native Messaging بلا أي fetch شبكي.
-        const native = await sendNativeAsync({ type: "download", url: m.url }, 20000);
-        if (native && native.type === "download-started") return { ok: true, transport: "native" };
-        try {
-          const r = await fetch(S.HTTP_URL + "/add", {
+    // Native Messaging أولًا (القناة الوحيدة التي لا يحجبها بريف/شيلدز):
+    // طلب تحميل حقيقي من المستخدم يستحق القناة الأكثر موثوقية أولًا.
+    (async () => {
+      const payload = { type: "download", url: m.url };
+      if (m.format_id) payload.format_id = m.format_id;
+      if (m.audio_only) payload.audio_only = true;
+      if (m.audio_format) payload.audio_format = m.audio_format;
+      const native = await sendNativeAsync(payload, 25000);
+      if (native && native.type === "download-started") return { ok: true, transport: "native" };
+      if (native && native.type === "error") {
+        return { ok: false, transport: "native", code: native.code, message: native.message };
+      }
+      // بديل: WebSocket، ثم POST /add.
+      const res = await wsSend(payload, 15000);
+      if (res && res.type === "download-started") return { ok: true, transport: "ws" };
+      try {
+        const r = await fetch(S.HTTP_URL + "/add", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({ url: m.url }),
@@ -406,26 +424,22 @@ chrome.runtime.onMessage.addListener((m, _s, respond) => {
   // استعلام الجودات من الزر العائم عبر القناة الوحيدة (Service Worker).
   if (m && m.type === "ULTRADM_PROBE") {
     (async () => {
-      try {
-        const res = await wsSend({ type: "probe", url: m.url }, 25000);
-        if (res && res.type === "formats") {
-          respond({ ok: true, ...res });
-          return;
-        }
-        // بريف: القناة الأصلية بدلاً من WebSocket المحجوب.
-        const native = await sendNativeAsync({ type: "probe", url: m.url }, 30000);
-        if (native && native.type === "formats") {
-          respond({ ok: true, ...native });
-          return;
-        }
-        const err = (res && res.type === "error" && res) || (native && native.type === "error" && native);
-        if (err) {
-          respond({ ok: false, code: err.code || "probe-failed", message: err.message || "فشل جلب الجودات" });
-        } else {
-          respond({ ok: false, code: "app-offline", message: "تعذّر الاتصال ببرنامج UltraDM — افتحه وتأكد من تشغيله" });
-        }
-      } catch {
-        respond({ ok: false, code: "app-offline", message: "تعذّر الاتصال ببرنامج UltraDM — افتحه وتأكد من تشغيله" });
+      // Native Messaging أولًا (لا يحجبه بريف)، ثم WebSocket بديلًا.
+      const native = await sendNativeAsync({ type: "probe", url: m.url }, 30000);
+      if (native && native.type === "formats") {
+        respond({ ok: true, ...native });
+        return;
+      }
+      const res = await wsSend({ type: "probe", url: m.url }, 25000);
+      if (res && res.type === "formats") {
+        respond({ ok: true, ...res });
+        return;
+      }
+      const err = (native && native.type === "error" && native) || (res && res.type === "error" && res);
+      if (err) {
+        respond({ ok: false, code: err.code || "probe-failed", message: err.message || "فشل جلب الجودات" });
+      } else {
+        respond({ ok: false, code: "app-offline", message: "تعذّر الاتصال ببرنامج UltraDM — افتحه، وإن استمرت المشكلة فعِّل «تثبيت الربط تلقائيًا» من إعدادات البرنامج" });
       }
     })();
     return true;

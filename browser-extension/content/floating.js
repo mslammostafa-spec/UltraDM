@@ -86,9 +86,8 @@
   }
 
   async function directDownload(url, fmt) {
-    // قناة Service Worker أولًا: بريف يحجب fetch نحو 127.0.0.1 من سياق الصفحة
-    // (Shields/adblock)، بينما مرور الـruntime messaging لا يمسّه.
-    if (await startDownload(url, fmt)) return true;
+  // Native Messaging أولًا عبر Service Worker (لا يحجبه بريف)، ثم WebSocket، ثم POST /add.
+  if (await startDownload(url, fmt)) return true;
     const data = {
       url,
       quality: fmt.label || fmt.id,
