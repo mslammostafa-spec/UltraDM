@@ -9,7 +9,13 @@
   window.__ultradm_floating = true;
 
   let theme = { accent: "#34d399", glow: "#22d3ee" };
-  let lastLabel = "تحميل عبر UltraDM";
+  // نص الزر حسب لغة الصفحة/المتصفح: عربي أو إنجليزي.
+  const IS_AR =
+    /^ar/i.test(navigator.language || "") ||
+    /^ar/i.test(document.documentElement.lang || "");
+  const LABEL = IS_AR ? "تحميل عبر UltraDM" : "Download with UltraDM";
+  const OFFLINE_LABEL = IS_AR ? "UltraDM غير متصل" : "UltraDM offline";
+  let lastLabel = LABEL;
 
   chrome.storage.local.get(["theme"], (s) => {
     if (s.theme && s.theme.accent) theme = s.theme;
@@ -17,7 +23,7 @@
   chrome.runtime.onMessage.addListener((m) => {
     if (m.type === "ultradm://theme" && m.theme) theme = m.theme;
     if (m.type === "ultradm://status") {
-      lastLabel = m.status === "online" ? "تحميل عبر UltraDM" : "UltraDM غير متصل";
+      lastLabel = m.status === "online" ? LABEL : OFFLINE_LABEL;
       document.querySelectorAll(".ultradm-fab").forEach(hydrate);
     }
   });
@@ -61,8 +67,11 @@
       msg.format_id = fmt.id;
     }
     // القناة الأساسية: WebSocket عبر الـService Worker.
+    // التنبيه: يجب نشر msg *قبل* type وإلا استبدل type:"download"
+    // نوع الرسالة "ULTRADM_DOWNLOAD" فلا يستقبلها الـService Worker أبدًا
+    // (هذا كان سبب اختفاء القائمة دون بدء التحميل).
     try {
-      const res = await chrome.runtime.sendMessage({ type: "ULTRADM_DOWNLOAD", ...msg });
+      const res = await chrome.runtime.sendMessage({ ...msg, type: "ULTRADM_DOWNLOAD" });
       return !!(res && res.ok);
     } catch {
       return false;
@@ -86,7 +95,7 @@
   }
 
   async function directDownload(url, fmt) {
-  // Native Messaging أولًا عبر Service Worker (لا يحجبه بريف)، ثم WebSocket، ثم POST /add.
+  // WebSocket عبر الـService Worker أولًا، ثم POST /add مباشرة.
   if (await startDownload(url, fmt)) return true;
     const data = {
       url,
@@ -274,12 +283,12 @@
     // مثبّتة على documentElement (لا داخل المشغل) حتى لا تختفي عند إعادة
     // بناء شجرة المشغل، وموضعها ديناميكي أسفل يمين المشغل بحجم مضغوط.
     cap.style.cssText =
-      "position:fixed !important;z-index:2147483647 !important;pointer-events:auto !important;top:auto;left:auto;right:auto;bottom:auto;";
+      "position:fixed !important;z-index:2147483647 !important;pointer-events:auto !important;top:auto;left:auto;right:auto;bottom:auto;width:fit-content !important;max-width:max-content !important;min-width:0 !important;white-space:nowrap;";
     cap.dir = "rtl";
     hydrate(cap);
     cap.innerHTML =
       HEX_SVG +
-      '<span class="ultradm-fab-label" style="font-size:12px;padding:0 2px">تحميل ▾</span>';
+      '<span class="ultradm-fab-label" style="font-size:12px;padding:0 4px">' + LABEL + "</span>";
     cap.setAttribute("data-visible", ""); // الكبسولة مرئية دائمًا (الصنف الأساسي يبدأ بـ opacity:0)
     cap.addEventListener("click", async (ev) => {
       ev.preventDefault();
@@ -294,7 +303,7 @@
       const res = await probeFormats(url);
       cap.classList.remove("loading");
       if (res && res.ok && Array.isArray(res.formats) && res.formats.length) {
-        setLabel("تحميل ▾");
+        setLabel(LABEL);
         buildMenu(cap, res.title, res.formats, url, cap);
         return;
       }
@@ -307,7 +316,7 @@
       } catch {
         setLabel("افتح UltraDM أولاً");
       }
-      setTimeout(() => setLabel("تحميل ▾"), 2500);
+      setTimeout(() => setLabel(LABEL), 2500);
     });
     document.documentElement.appendChild(cap);
     // موضع ديناميكي: داخل حدود المشغل الحالية، الزاوية العلوية اليسرى.
@@ -325,6 +334,8 @@
       cap.style.display = "";
       cap.style.left = Math.max(8, Math.min(r.left + 12, innerWidth - 140)) + "px";
       cap.style.top = Math.max(8, r.top + 12) + "px";
+      cap.style.right = "auto";
+      cap.style.bottom = "auto";
     };
     place();
     addEventListener("resize", place, { passive: true });

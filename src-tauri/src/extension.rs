@@ -105,6 +105,23 @@ async fn handle_conn(app: AppHandle, mut stream: tokio::net::TcpStream) -> Resul
         }
     }
     let text = String::from_utf8_lossy(&buf).to_string();
+    // حماية من DNS Rebinding: ترويسة Host يجب أن تكون الخادم المحلي نفسه —
+    // صفحة خبيثة تُعيد ربط نطاقها إلى 127.0.0.1 تصل بترويسة Host لنطاقها فتُرفض.
+    let host_ok = text.lines().any(|l| {
+        let l = l.trim();
+        let (name, value) = match l.split_once(':') {
+            Some((n, v)) => (n.trim().to_ascii_lowercase(), v.trim()),
+            None => return false,
+        };
+        name == "host"
+            && matches!(
+                value.to_ascii_lowercase().as_str(),
+                "127.0.0.1:24580" | "localhost:24580" | "[::1]:24580"
+            )
+    });
+    if !host_ok {
+        return Err("ترويسة Host غير صالحة — يُقبل الخادم المحلي فقط (حماية من DNS Rebinding)".into());
+    }
     // فحص صحة خفيف للإضافة: GET /health يجيب 200 بدون مصافحة WebSocket.
     if text.starts_with("GET /health") {
         let body = "{\"ok\":true,\"app\":\"ultradm\"}";

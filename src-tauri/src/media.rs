@@ -126,6 +126,16 @@ fn tools_bin_dir() -> Option<std::path::PathBuf> {
     }
 }
 
+/// إخفاء نافذة الكونسول السوداء على ويندوز لأي عملية فرعية (CREATE_NO_WINDOW).
+#[cfg(windows)]
+fn no_window(cmd: &mut std::process::Command) {
+    use std::os::windows::process::CommandExt;
+    const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+    cmd.creation_flags(CREATE_NO_WINDOW);
+}
+#[cfg(not(windows))]
+fn no_window(_cmd: &mut std::process::Command) {}
+
 /// أمر الأداة (tokio): من مجلد bin الرسمي إن وُجدت فيه، وإلا من PATH.
 fn tool_cmd(tool: &str) -> tokio::process::Command {
     let exe = if cfg!(windows) { format!("{tool}.exe") } else { tool.to_string() };
@@ -137,8 +147,17 @@ fn tool_cmd(tool: &str) -> tokio::process::Command {
         None => tokio::process::Command::new(tool),
     };
     cmd.kill_on_drop(true);
+    no_window_tokio(&mut cmd);
     cmd
 }
+
+/// CREATE_NO_WINDOW للأوامر غير المتزامنة (tokio) على ويندوز.
+#[cfg(windows)]
+fn no_window_tokio(cmd: &mut tokio::process::Command) {
+    cmd.creation_flags(0x0800_0000);
+}
+#[cfg(not(windows))]
+fn no_window_tokio(_cmd: &mut tokio::process::Command) {}
 
 /// أمر الأداة (مزامن للاستدعاءات السريعة مثل --version): من مجلد bin الرسمي
 /// إن وُجدت فيه، وإلا من PATH.
@@ -147,10 +166,12 @@ fn tool_cmd_sync(tool: &str) -> std::process::Command {
     let path = tools_bin_dir()
         .map(|bin| bin.join(&exe))
         .filter(|p| p.is_file());
-    match path {
+    let mut cmd = match path {
         Some(p) => std::process::Command::new(p),
         None => std::process::Command::new(tool),
-    }
+    };
+    no_window(&mut cmd);
+    cmd
 }
 
 /// هل الأداة موجودة (في مجلد bin الرسمي أو PATH) وتعمل؟
@@ -540,8 +561,8 @@ pub async fn media_install_tools(app: AppHandle) -> Result<(), String> {
     let ffmpeg_url = "https://github.com/GyanD/codexffmpeg/releases/download/7.1/ffmpeg-7.1-essentials_build.zip";
     download_to(ffmpeg_url, &ffmpeg_zip, &app, "ffmpeg").await?;
     let _ = app.emit("media://tools-progress", serde_json::json!({ "step": "ffmpeg-extract", "percent": 0 }));
-    let out = tokio::process::Command::new("powershell")
-        .args([
+    let mut out = tokio::process::Command::new("powershell");
+    out.args([
             "-NoProfile",
             "-Command",
             &format!(
@@ -549,7 +570,13 @@ pub async fn media_install_tools(app: AppHandle) -> Result<(), String> {
                 ffmpeg_zip.display(),
                 bin.join("ffmpeg-x").display()
             ),
-        ])
+        ]);
+    #[cfg(windows)]
+    {
+        // CREATE_NO_WINDOW: لا وميض نافذة كونسول سوداء.
+        out.creation_flags(0x0800_0000);
+    }
+    let out = out
         .output()
         .await
         .map_err(|e| format!("فكّ FFmpeg: {e}"))?;
@@ -560,8 +587,8 @@ pub async fn media_install_tools(app: AppHandle) -> Result<(), String> {
         ));
     }
     // انقل ffmpeg.exe و ffprobe.exe من المجلد المفكوك (داخل bin/…) إلى bin.
-    let find = tokio::process::Command::new("powershell")
-        .args([
+    let mut find = tokio::process::Command::new("powershell");
+    find.args([
             "-NoProfile",
             "-Command",
             &format!(
@@ -569,7 +596,12 @@ pub async fn media_install_tools(app: AppHandle) -> Result<(), String> {
                 bin.join("ffmpeg-x").display(),
                 bin.join("ffmpeg-x").display()
             ),
-        ])
+        ]);
+    #[cfg(windows)]
+    {
+        find.creation_flags(0x0800_0000);
+    }
+    let find = find
         .output()
         .await
         .map_err(|e| format!("بحث FFmpeg: {e}"))?;
