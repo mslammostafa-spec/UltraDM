@@ -26,6 +26,7 @@ import SettingsDialog from "./components/SettingsDialog";
 import AboutDialog from "./components/AboutDialog";
 import type { UpdateStatus } from "./lib/updater";
 import { ListFilter } from "lucide-react";
+import { openAuxWindow } from "./lib/auxWindows";
 import { inDesktop, engineAdd, enginePause, engineResume, engineCancel, registerTorrentHandler, requestPower, runAfterFinish, matchesFilter, parseFilterId, openPath, type AfterFinish, type Download } from "./lib/ipc";
 import { DEFAULT_SETTINGS, applyTheme, THEMES, DEFAULT_THEME_ID, type Settings } from "./lib/themes";
 import { loadSettings, saveSettings } from "./lib/settings";
@@ -149,16 +150,34 @@ export default function App() {
       const p2 = listen<string>("clipboard://link", (e) => {
         openInfo(e.payload, e.payload.startsWith("magnet:?"));
       });
-      // التقطت إضافة المتصفح رابطًا: افتح نافذة "معلومات التحميل" فورًا.
+      // التقطت إضافة المتصفح رابطًا: افتح نافذة "معلومات التحميل" المستقلة
+      // فورًا (النافذة الرئيسية تبقى مخفيّة).
       const p3 = listen<{ url: string; kind?: string | null }>("extension://capture", (e) => {
         const u = e.payload.url;
-        openInfo(u, u.startsWith("magnet:?") || /\.torrent([?#]|$)/i.test(u));
+        const torrent = u.startsWith("magnet:?") || /\.torrent([?#]|$)/i.test(u);
+        void openAuxWindow("info", { url: u, torrent });
       });
-      void Promise.all([p1, p2, p3]).then(([u1, u2, u3]) => {
+      // بدأ تحميل وسائط (yt-dlp) من الزر العائم: افتح نافذة التقدّم المستقلة.
+      const p4 = listen<{ id: string }>("media://started", (e) => {
+        void openAuxWindow("progress", {
+          id: e.payload.id,
+          name: "تحميل وسائط (yt-dlp)",
+          category: "video",
+          sizeBytes: 0,
+          progress: 0,
+          speedBps: 0,
+          peakSpeedBps: 0,
+          etaSeconds: null,
+          threads: 1,
+          status: "downloading",
+        });
+      });
+      void Promise.all([p1, p2, p3, p4]).then(([u1, u2, u3, u4]) => {
         un = () => {
           u1();
           u2();
           u3();
+          u4();
         };
       });
     });

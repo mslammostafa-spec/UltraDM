@@ -393,7 +393,14 @@ pub fn build_args(req: &MediaRequest) -> Vec<String> {
     ];
     if let Some(f) = &req.format_id {
         if f != "best" {
-            a.extend(["-f".into(), f.clone()]);
+            // تنسيق فيديو مفرد (مثل "137") يُدمَج مع أفضل صوت — وإلا يخرج الملف
+            // بلا صوت. تنسيقات الدمج الصريحة أو bestaudio تُمرَّر كما هي.
+            let merged = if f.contains('+') || f.contains("bestaudio") || f.contains('/') {
+                f.clone()
+            } else {
+                format!("{f}+bestaudio[ext=m4a]/bestaudio/best")
+            };
+            a.extend(["-f".into(), merged]);
         }
     }
     let mode = req.subs_mode.clone().unwrap_or_else(|| "none".into());

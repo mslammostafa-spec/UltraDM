@@ -243,16 +243,6 @@ async fn handle_conn(app: AppHandle, mut stream: tokio::net::TcpStream) -> Resul
 }
 
 /// إظهار النافذة المفتوحة وجلبها للمقدمة (تُستخدم للنسخة الواحدة وللالتقاط).
-fn show_main(app: &AppHandle) {
-    if let Some(w) = app.get_webview_window("main") {
-        let _: Result<(), tauri::Error> = (|| {
-            w.show()?;
-            w.unminimize()?;
-            w.set_focus()
-        })();
-    }
-}
-
 async fn handle_message(app: &AppHandle, raw: &str) -> Option<String> {
     let v: serde_json::Value = serde_json::from_str(raw).ok()?;
     match v.get("type")?.as_str()? {
@@ -261,7 +251,8 @@ async fn handle_message(app: &AppHandle, raw: &str) -> Option<String> {
             // افتح نافذة "معلومات التحميل" مباشرة عبر حدث تلتقطه الواجهة.
             CAPTURES_SENT.fetch_add(1, Ordering::SeqCst);
             let _ = app.emit("extension://capture", &req);
-            show_main(app);
+            // النافذة الرئيسية تبقى مخفيّة: الواجهة تفتح نافذة "معلومات
+            // التحميل" المستقلة عند سماع هذا الحدث.
             Some("{\"type\":\"captured\"}".into())
         }
         // طلب قائمة الجودات للزر العائم في الإضافة (yt-dlp).
@@ -302,9 +293,19 @@ async fn handle_message(app: &AppHandle, raw: &str) -> Option<String> {
                 subs_mode: Some("none".into()),
             };
             let state = app.state::<super::media::MediaHandle>();
-            let id = super::media::media_download(app.clone(), state, req).await.ok()?;
-            show_main(app);
-            Some(format!("{{\"type\":\"download-started\",\"id\":\"{id}\"}}"))
+            match super::media::media_download(app.clone(), state, req).await {
+                Ok(id) => {
+                    // النافذة الرئيسية تبقى مخفيّة: نُطلق حدثًا تلتقطه الواجهة
+                    // لفتح نافذة "تقدّم التحميل" المستقلة.
+                    use tauri::Emitter;
+                    let _ = app.emit(
+                        "media://started",
+                        serde_json::json!({ "id": id, "url": v.get("url").cloned().unwrap_or_default() }),
+                    );
+                    Some(format!("{{\"type\":\"download-started\",\"id\":\"{id}\"}}"))
+                }
+                Err(_) => None,
+            }
         }
         _ => None,
     }
@@ -330,6 +331,8 @@ fn probe_reply(info: &super::media::MediaInfo) -> serde_json::Value {
         .formats
         .iter()
         .filter(|f| f.height.is_some())
+        // استبعاد Storyboard (sb0/sb1…) و MHTML: صور مصغّرة لا تمثّل جودة فيديو.
+        .filter(|f| !f.format_id.starts_with("sb") && !f.ext.eq_ignore_ascii_case("mhtml"))
         .collect();
     video.sort_by_key(|f| std::cmp::Reverse(f.height.unwrap_or(0)));
     for f in video {
