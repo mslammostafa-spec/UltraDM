@@ -3,7 +3,7 @@ import {
   X, Link2, Magnet, Pause, Play, Trash2, CalendarClock, Moon, Sun, Undo2,
   Settings, RefreshCw, Info, Minimize2,
 } from "lucide-react";
-import { inDesktop, exitApp } from "../lib/ipc";
+import { inDesktop } from "../lib/ipc";
 import { checkForUpdates, type UpdateStatus } from "../lib/updater";
 
 export function ToolbarButton({
@@ -83,15 +83,19 @@ export default function Toolbar({
       className="sticky top-0 z-50 flex flex-wrap items-center gap-2 px-4 min-h-16 py-1.5 border-b shrink-0 select-none pointer-events-auto min-w-0 max-w-full overflow-visible"
       style={{ background: "var(--surface)", borderColor: "var(--border)" }}
     >
-      {/* زر X: إنهاء حقيقي للبرنامج (يخرج من التطبيق بالكامل).
-          زر الشريط المجاور يخفي النافذة إلى شريط النظام بدلاً منه. */}
+      {/* زر X: يصغّر البرنامج بهدوء إلى أيقونة شريط النظام (يلتقط الروابط
+          في الخلفية). الإغلاق الكامل من «خروج نهائي (Exit)» في قائمة
+          أيقونة الشريط. */}
       {desktop && (
         <button
           data-tauri-drag-region="false"
           className="w-11 h-11 shrink-0 z-50 pointer-events-auto grid place-items-center cursor-pointer transition-colors duration-150 hover:!bg-[#e5484d] hover:!text-white"
           style={{ color: "var(--muted)" }}
-          aria-label="إنهاء البرنامج" title="إنهاء البرنامج"
-          onClick={() => { void exitApp(); }}
+          aria-label="تصغير إلى شريط النظام" title="تصغير إلى شريط النظام"
+          onClick={async () => {
+            const { getCurrentWindow } = await import("@tauri-apps/api/window");
+            void getCurrentWindow().close();
+          }}
         >
           <X size={16} />
         </button>

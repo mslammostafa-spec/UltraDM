@@ -604,7 +604,7 @@ pub fn run() {
 
 
             let show = MenuItem::with_id(app, "show", "إظهار UltraDM", true, None::<&str>)?;
-            let quit = MenuItem::with_id(app, "quit", "إنهاء UltraDM", true, None::<&str>)?;
+            let quit = MenuItem::with_id(app, "quit", "خروج نهائي (Exit)", true, None::<&str>)?;
             let menu = Menu::with_items(app, &[&show, &quit])?;
             let mut tray = tauri::tray::TrayIconBuilder::with_id("ultradm-tray")
                 .menu(&menu)
@@ -627,12 +627,14 @@ pub fn run() {
             Ok(())
         })
         .on_window_event(|window, event| {
-            // زر X ينهي التطبيق بالكامل — لم يعد يُخفي النافذة: كان الإخفاء
-            // مع إطلاق عملية المضيف من المتصفح يعطي إحساس «العودة من نفسه».
-            // الإخفاء إلى شريط النظام متاح من قائمة أيقونة الشريط.
-            if let tauri::WindowEvent::CloseRequested { .. } = event {
-                let app = window.app_handle().clone();
-                exit_app(app);
+            // زر X يصغّر البرنامج بهدوء إلى أيقونة شريط النظام: يبقى جاهزًا
+            // لالتقاط الروابط من المتصفح في الخلفية. الإغلاق الكامل متاح من
+            // «خروج نهائي (Exit)» في قائمة أيقونة الشريط. (عودة النافذة
+            // من تلقاء نفسها عولجت في v1.1.25: لا فحص دوري عبر Native
+            // Messaging، ومعالج single-instance يتجاهل إطلاقات المضيف.)
+            if let tauri::WindowEvent::CloseRequested { api, .. } = event {
+                api.prevent_close();
+                let _ = window.hide();
             }
         })
         .invoke_handler(tauri::generate_handler![
