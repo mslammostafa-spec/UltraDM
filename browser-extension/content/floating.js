@@ -280,19 +280,33 @@
     cap.innerHTML =
       HEX_SVG +
       '<span class="ultradm-fab-label" style="font-size:12px;padding:0 2px">تحميل ▾</span>';
+    cap.setAttribute("data-visible", ""); // الكبسولة مرئية دائمًا (الصنف الأساسي يبدأ بـ opacity:0)
     cap.addEventListener("click", async (ev) => {
       ev.preventDefault();
       ev.stopPropagation();
-      // إرسال فوري للصفحة الحالية إلى UltraDM (نافذة الجودات تُفتح في البرنامج).
+      // جلب الجودات فورًا وعرض القائمة المنسدلة فوق الفيديو — بحالة فورية
+      // على الكبسولة نفسها («جارٍ جلب الجودات…») قبل وصول الرد.
       const label = cap.querySelector(".ultradm-fab-label");
       const setLabel = (t) => { if (label) label.textContent = t; };
-      setLabel("جارٍ الإرسال…");
-      let ok = false;
+      setLabel("جارٍ جلب الجودات…");
+      cap.classList.add("loading");
+      const url = ytPageUrl() || location.href;
+      const res = await probeFormats(url);
+      cap.classList.remove("loading");
+      if (res && res.ok && Array.isArray(res.formats) && res.formats.length) {
+        setLabel("تحميل ▾");
+        buildMenu(cap, res.title, res.formats, url, cap);
+        return;
+      }
+      // فشل الجلب: اشرح السبب ثم أرسل الرابط إلى UltraDM كخطة بديلة.
+      setLabel((res && res.message) || "تعذّر جلب الجودات");
+      setTimeout(() => setLabel("جارٍ الإرسال لـ UltraDM…"), 1800);
       try {
-        const res = await chrome.runtime.sendMessage({ type: "ULTRADM_DOWNLOAD", url: window.location.href, title: document.title });
-        ok = !!(res && res.ok);
-      } catch { ok = false; }
-      setLabel(ok ? "تم الإرسال لـ UltraDM ✓" : "افتح UltraDM أولاً");
+        await chrome.runtime.sendMessage({ type: "ULTRADM_DOWNLOAD", url, title: document.title });
+        setLabel("تم الإرسال لـ UltraDM ✓");
+      } catch {
+        setLabel("افتح UltraDM أولاً");
+      }
       setTimeout(() => setLabel("تحميل ▾"), 2500);
     });
     document.documentElement.appendChild(cap);

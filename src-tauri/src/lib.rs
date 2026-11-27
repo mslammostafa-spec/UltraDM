@@ -28,6 +28,53 @@ pub mod torrent;
 
 const MAX_THREADS: u32 = 32;
 
+/// توسيع متغيرات بيئة ويندوز بصيغة %NAME% (مثل %USERNAME% و %USERPROFILE%)
+/// في مسارات قد تكون حُفظت نصًا حرفيًا. أي متغير غير موجود يُترك كما هو.
+/// (أسماء متغيرات ويندوز غير حساسة لحالة الأحرف، لذا نجرّب الاسم كما هو ثم
+/// بأحرف كبيرة.)
+#[must_use]
+pub fn expand_env_vars(path: &str) -> String {
+    if !path.contains('%') {
+        return path.to_string();
+    }
+    let mut out = String::with_capacity(path.len());
+    let bytes = path.as_bytes();
+    let mut i = 0;
+    while i < bytes.len() {
+        if bytes[i] == b'%' {
+            if let Some(end_rel) = path[i + 1..].find('%') {
+                let name = &path[i + 1..i + 1 + end_rel];
+                if !name.is_empty() && !name.contains('%') {
+                    let value = std::env::var(name)
+                        .or_else(|_| std::env::var(name.to_uppercase()))
+                        .unwrap_or(path[i..i + end_rel + 2].to_string());
+                    out.push_str(&value);
+                    i += end_rel + 2;
+                    continue;
+                }
+            }
+        }
+        let ch = path[i..].chars().next().unwrap_or('%');
+        out.push(ch);
+        i += ch.len_utf8();
+    }
+    out
+}
+
+/// أمر للواجهة: يعيد المسار بعد توسيع متغيرات البيئة (وإن كان فارغًا يعيد
+/// مجلد التنزيلات الحقيقي للمستخدم).
+#[tauri::command]
+fn expand_path(path: String) -> String {
+    let expanded = expand_env_vars(path.trim());
+    if expanded.is_empty() {
+        return dirs::download_dir()
+            .or_else(dirs::home_dir)
+            .map(|p| p.to_string_lossy().into_owned())
+            .unwrap_or_default();
+    }
+    expanded
+}
+
 #[derive(Serialize)]
 pub struct AppInfo {
     pub version: &'static str,
@@ -625,7 +672,8 @@ pub fn run() {
             extension::extension_binding_status,
             extension::extension_register_browsers,
             cancel_shutdown,
-            quit_app
+            quit_app,
+            expand_path
         ])
         .run(tauri::generate_context!())
         .expect("خطأ في تشغيل UltraDM");
@@ -648,5 +696,17 @@ mod tests {
         assert!(shutdown_device_impl(30).is_err());
         assert!(sleep_device_impl().is_err());
         assert!(cancel_shutdown_impl().is_err());
+    }
+
+    #[test]
+    fn expand_env_vars_expands_and_preserves_unknown() {
+        std::env::set_var("ULTRADM_TEST_USER", "sami");
+        assert_eq!(expand_env_vars("C:\\Users\\%ULTRADM_TEST_USER%"), "C:\\Users\\sami");
+        // متغير غير موجود يبقى حرفيًا؛ واسم صغير يُجرَّب بأحرف كبيرة.
+        assert_eq!(expand_env_vars("%no_such_var_x%"), "%no_such_var_x%");
+        assert_eq!(expand_env_vars("%ultradm_test_user%\\Downloads"), "sami\\Downloads");
+        // بلا متغيرات: يبقى كما هو، والنص غير المكتمل يبقى حرفيًا.
+        assert_eq!(expand_env_vars("C:\\Downloads"), "C:\\Downloads");
+        assert_eq!(expand_env_vars("100% done"), "100% done");
     }
 }

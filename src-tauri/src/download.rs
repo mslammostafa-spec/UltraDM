@@ -1003,6 +1003,8 @@ pub async fn engine_add(
         return Err("الرابط يجب أن يكون http/https أو magnet: أو رابط .torrent/.nzb".into());
     }
     let threads = threads.clamp(1, MAX_THREADS);
+    // المسار المحفوظ قد يحمل %USERNAME% حرفيًا — وسِّعه قبل بناء مسار الملف.
+    let save_path = crate::expand_env_vars(save_path.trim());
     let (size, _etag, _lm, _ar, cd_name) = probe(&url, &state.0.client).await?;
     let name = cd_name
         .filter(|n| !n.trim().is_empty()).map_or_else(|| file_name_from_url(&url), |n| sanitize_file_name(n.trim()));

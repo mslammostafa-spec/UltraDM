@@ -153,6 +153,55 @@ fn tool_cmd_sync(tool: &str) -> std::process::Command {
     }
 }
 
+/// هل الأداة موجودة (في مجلد bin الرسمي أو PATH) وتعمل؟
+fn tool_available(tool: &str) -> bool {
+    run_capture(
+        tool_cmd_sync(tool)
+            .arg("--version")
+            .stdout(Stdio::piped())
+            .stderr(Stdio::null()),
+    )
+    .is_ok()
+}
+
+/// تثبيت yt-dlp وحده (بلا `FFmpeg`) ليفسح فحص الجودات فورًا حين لا يكون
+/// مثبتًا: تنزيل exe واحد من إصدارات GitHub الرسمية إلى مجلد bin الرسمي.
+async fn install_ytdlp_quiet() -> Result<(), String> {
+    let bin = tools_bin_dir().ok_or("تعذّر تحديد مجلد الأدوات")?;
+    tokio::fs::create_dir_all(&bin).await.map_err(|e| e.to_string())?;
+    let dest = bin.join(if cfg!(windows) { "yt-dlp.exe" } else { "yt-dlp" });
+    let url = if cfg!(windows) {
+        "https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp.exe"
+    } else {
+        "https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp"
+    };
+    let resp = reqwest::get(url)
+        .await
+        .map_err(|e| format!("تنزيل yt-dlp: {e}"))?
+        .error_for_status()
+        .map_err(|e| format!("تنزيل yt-dlp: {e}"))?;
+    tokio::fs::write(&dest, resp.bytes().await.map_err(|e| format!("تنزيل yt-dlp: {e}"))?)
+        .await
+        .map_err(|e| format!("كتابة yt-dlp: {e}"))?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let _ = tokio::fs::set_permissions(&dest, std::fs::Permissions::from_mode(0o755)).await;
+    }
+    if !tool_available("yt-dlp") {
+        return Err("نُزِّل yt-dlp لكنه لا يعمل — أعد التثبيت من إعدادات البرنامج".into());
+    }
+    Ok(())
+}
+
+/// يضمن توفر yt-dlp قبل عمل يطلب منه: يثبّته تلقائيًا إن غاب.
+async fn ensure_ytdlp() -> Result<(), String> {
+    if tool_available("yt-dlp") {
+        return Ok(());
+    }
+    install_ytdlp_quiet().await
+}
+
 /// فحص توفّر yt-dlp و `FFmpeg` وإصداريهما.
 #[tauri::command]
 #[must_use]
@@ -198,6 +247,8 @@ fn s_opt(v: &serde_json::Value, key: &str) -> Option<String> {
 /// ولغات الترجمة (اليدوية والمولَّدة تلقائيًا).
 #[tauri::command]
 pub async fn media_probe(url: String) -> Result<MediaInfo, String> {
+    // تثبيت تلقائي لـ yt-dlp إن لم يكن موجودًا بدل فشل صامت.
+    ensure_ytdlp().await?;
     let url_arg = url.clone();
     let out = tokio::task::spawn_blocking(move || {
         run_capture(
@@ -378,6 +429,10 @@ pub fn parse_percent(line: &str) -> Option<f64> {
 /// بدء تحميل وسائط عبر yt-dlp (مع `FFmpeg` للدمج/التحويل).
 #[tauri::command]
 pub async fn media_download(app: AppHandle, state: State<'_, MediaHandle>, req: MediaRequest) -> Result<String, String> {
+    // تثبيت تلقائي لـ yt-dlp إن لم يكن موجودًا، وتوسيع أي متغيرات بيئة في المسار.
+    ensure_ytdlp().await?;
+    let mut req = req;
+    req.output_dir = crate::expand_env_vars(&req.output_dir);
     let id = format!("m{}", state.seq.fetch_add(1, Ordering::Relaxed));
     let args = build_args(&req);
     let mut child = tool_cmd("yt-dlp")

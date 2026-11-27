@@ -42,17 +42,24 @@ export function DownloadInfoDialog({
   const [category, setCategory] = useState<Exclude<Category, "all">>(detected);
   const [remember, setRemember] = useState(true);
   const [savePath, setSavePath] = useState(
-    () => localStorage.getItem(PATH_KEY + detected) ?? defaultPathFor(detected as Exclude<Category, "all">),
+    () => localStorage.getItem(PATH_KEY + detected) ?? "",
   );
 
-  // عند تغيّر التصنيف يُستبدل المسار المحفوظ لهذا التصنيف إن وُجد.
+  // عند تغيّر التصنيف يُستبدل المسار المحفوظ لهذا التصنيف إن وُجد، وإلا
+  // يُوسَّع المسار الافتراضي (مجلد التنزيلات الحقيقي) عبر الخلفية.
   useEffect(() => {
-    setSavePath(localStorage.getItem(PATH_KEY + category) ?? defaultPathFor(category));
+    const stored = localStorage.getItem(PATH_KEY + category);
+    if (stored) {
+      setSavePath(stored);
+      void resolveSavePath(stored).then(setSavePath);
+    } else {
+      void resolveSavePath("").then(setSavePath);
+    }
   }, [category]);
 
   const build = (): StartConfig => {
-    const path = savePath.trim() || defaultPathFor(category);
-    if (remember) localStorage.setItem(PATH_KEY + category, path);
+    const path = savePath.trim();
+    if (remember && path) localStorage.setItem(PATH_KEY + category, path);
     return { url: url.trim(), category, savePath: path, description, threads };
   };
 
@@ -124,7 +131,7 @@ export function DownloadInfoDialog({
     try {
       await mediaDownload({
         url: url.trim(),
-        output_dir: savePath.trim() || defaultPathFor(category),
+        output_dir: await resolveSavePath(savePath),
         format_id: audioOnly ? null : fmt,
         container,
         audio_only: audioOnly,
@@ -145,7 +152,7 @@ export function DownloadInfoDialog({
     try {
       await mediaDownload({
         url: url.trim(),
-        output_dir: savePath.trim() || defaultPathFor(category),
+        output_dir: await resolveSavePath(savePath),
         format_id: q.audio ? "bestaudio" : q.id,
         container: q.audio ? "mp3" : "mp4",
         audio_only: q.audio,
@@ -419,10 +426,17 @@ function Field({ label, children }: { label: string; children: React.ReactNode }
   );
 }
 
-function defaultPathFor(c: Exclude<Category, "all">): string {
-  // مجلد التخزين الرسمي: %LOCALAPPDATA%\UltraDM (يتطلبه نموذج Windows).
-  const base = "C:\\Users\\%USERNAME%\\AppData\\Local\\UltraDM";
-  return `${base}\\${CATEGORY_LABEL[c]}`;
+/// يوسّع أي %VAR% عبر أمر الخلفية expand_path، ويعيد مجلد التنزيلات
+/// الحقيقي عند فراغ المسار. يُستخدم عند عرض المسار في الحقل وعند البدء.
+export async function resolveSavePath(raw: string): Promise<string> {
+  const trimmed = raw.trim();
+  if (trimmed && !trimmed.includes("%")) return trimmed;
+  try {
+    const { invoke } = await import("@tauri-apps/api/core");
+    return (await invoke("expand_path", { path: trimmed })) as string;
+  } catch {
+    return trimmed;
+  }
 }
 
 /* ─────────────── نافذة حالة التحميل التفصيلية (Download Progress Window) ─────────────── */
