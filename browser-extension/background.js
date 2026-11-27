@@ -12,7 +12,6 @@ const sent = new Map(); // url -> ts
 let ws = null;
 let wsReady = false;
 let reconnectTimer = null;
-let nativeFallback = false;
 let status = "connecting"; // connecting | online | offline
 let theme = { id: "glass-emerald-cyan", accent: "#34d399", glow: "#22d3ee" };
 let enabled = true;
@@ -111,10 +110,8 @@ function sendNative(payload) {
       payload,
       (reply) => {
         if (chrome.runtime.lastError) {
-          nativeFallback = false;
           return;
         }
-        nativeFallback = true;
         if (reply && reply.type === "theme") applyTheme(reply);
       },
     );
@@ -179,11 +176,10 @@ async function connectWs() {
     appUp = false; // البرنامج مغلق أو أن بريف يحجب الطلب — نجرب WS على أي حال.
   }
   if (!appUp) {
-    // لا تثق بالفشل في بريف: إن لم تُفتح القناة سيتكفّل onclose بإعادة المحاولة.
-    if (await sendNativeAsync({ type: "hello", extension: "ultradm" }, 5000)) {
-      nativeFallback = true; // البرنامج حي والقناة الأصلية تعمل
-    }
-    // نكمل وفتح الـWebSocket محاولةً رغم فشل /health.
+    // لا فحص Native Messaging هنا: إطلاق chrome.runtime.sendNativeMessage
+    // يشغّل عملية المضيف عبر نظام التشغيل — ومع الخطأ القديم في manifest
+    // كانت تُفتح نافذة UltraDM من جديد بعد إغلاقها. الفحص عبر /health فقط،
+    // والقناة الأصلية تُستخدم عند طلب فعلي من المستخدم (تحميل/جودات).
   }
   let socket;
   try {
@@ -349,7 +345,7 @@ chrome.storage.local.get(["theme", "enabled"], (s) => {
 
 // إنذار كل 25 ثانية يُبقي الـService Worker حياً ويعيد المحاولة بهدوء
 // (الفحص عبر /health صامت تماماً حين يكون البرنامج مغلقاً).
-chrome.alarms.create("ultradm-keepalive", { periodInMinutes: 25 / 60 });
+chrome.alarms.create("ultradm-keepalive", { periodInMinutes: 4 });
 chrome.alarms.onAlarm.addListener((a) => {
   if (a.name === "ultradm-keepalive" && enabled && (!ws || ws.readyState !== WebSocket.OPEN)) {
     void connectWs();

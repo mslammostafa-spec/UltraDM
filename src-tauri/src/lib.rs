@@ -466,7 +466,13 @@ pub fn run() {
     let silent = std::env::args().any(|a| a == "--ultradm-silent");    tauri::Builder::default()
         // نسخة واحدة فقط: أي تشغيل ثانٍ (أو رابط من المتصفح) يعيد النافذة
         // المفتوحة إلى المقدمة بدل فتح نسخة جديدة بأيقونة ثانية في شريط المهام.
-        .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
+        // استثناء حاسم: الإطلاق في وضع --native-host من المتصفح يجب ألا
+        // يُظهر النافذة إطلاقًا — وإلا أعاد البرنامج فتح نفسه بعد كل إغلاق
+        // كلما استخدمت الإضافة القناة الأصلية.
+        .plugin(tauri_plugin_single_instance::init(|app, args, _cwd| {
+            if args.iter().any(|a| a == "--native-host" || a == "--ultradm-silent") {
+                return;
+            }
             if let Some(w) = app.get_webview_window("main") {
                 let _ = w.show();
                 let _ = w.unminimize();
@@ -574,11 +580,12 @@ pub fn run() {
             Ok(())
         })
         .on_window_event(|window, event| {
-            // زر X يُخفي النافذة إلى شريط النظام بدل الإنهاء؛
-            // الإنهاء الحقيقي من قائمة أيقونة الشريط فقط.
-            if let tauri::WindowEvent::CloseRequested { api, .. } = event {
-                api.prevent_close();
-                let _ = window.hide();
+            // زر X ينهي التطبيق بالكامل — لم يعد يُخفي النافذة: كان الإخفاء
+            // مع إطلاق عملية المضيف من المتصفح يعطي إحساس «العودة من نفسه».
+            // الإخفاء إلى شريط النظام متاح من قائمة أيقونة الشريط.
+            if let tauri::WindowEvent::CloseRequested { .. } = event {
+                let app = window.app_handle().clone();
+                exit_app(app);
             }
         })
         .invoke_handler(tauri::generate_handler![
